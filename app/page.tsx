@@ -68,7 +68,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchTickets();
-    const socket = io('http://localhost:3000');
+    const socket = io({ path: "/api/socket" });
     socket.on('actualizar_dashboard', () => fetchTickets());
     return () => { socket.disconnect(); };
   }, []);
