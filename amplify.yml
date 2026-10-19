@@ -6,6 +6,11 @@ frontend:
         - npm ci
     build:
       commands:
+        - echo "NEXTAUTH_SECRET=$NEXTAUTH_SECRET" >> .env
+        - echo "NEXTAUTH_URL=$NEXTAUTH_URL" >> .env
+        - echo "COGNITO_CLIENT_ID=$COGNITO_CLIENT_ID" >> .env
+        - echo "COGNITO_CLIENT_SECRET=$COGNITO_CLIENT_SECRET" >> .env
+        - echo "COGNITO_ISSUER=$COGNITO_ISSUER" >> .env
         - npm run build
   artifacts:
     baseDirectory: .next
