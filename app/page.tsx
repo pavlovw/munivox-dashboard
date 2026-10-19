@@ -55,9 +55,11 @@ export default function Dashboard() {
   const [ticketsCercanos, setTicketsCercanos] = useState<any[]>([]);
   const [coordenadaEnfoque, setCoordenadaEnfoque] = useState<[number, number] | null>(null);
 
+  const API_GATEWAY_URL = "https://nn4p1ybmu2.execute-api.us-east-2.amazonaws.com";
+
   const fetchTickets = async () => {
     try {
-      const res = await fetch('/api/tickets');
+      const res = await fetch(`${API_GATEWAY_URL}/tickets`);
       if (res.ok) setTickets(await res.json());
     } catch (error) { 
       console.error(error); 
@@ -68,6 +70,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchTickets();
+    // El WebSocket se mantiene en Azure para recibir notificaciones en tiempo real
     const socket = io("https://socket-service.politeplant-263a4d5b.eastus.azurecontainerapps.io", { transports: ['websocket', 'polling'] });
     socket.on('actualizar_dashboard', () => fetchTickets());
     return () => { socket.disconnect(); };
@@ -85,15 +88,20 @@ export default function Dashboard() {
 
   const abrirDetalle = async (id: string, lat: number | null, lng: number | null) => {
     try {
-      const res = await fetch(`/api/tickets/${id}`);
+      const res = await fetch(`${API_GATEWAY_URL}/tickets/${id}`);
       if (res.ok) {
         const detalle = await res.json();
         setTicketSeleccionado(detalle);
         
         if (lat && lng) {
           setCoordenadaEnfoque([lat, lng]);
-          const resCercanos = await fetch(`/api/tickets/cercanos?lat=${lat}&lng=${lng}`);
-          if (resCercanos.ok) setTicketsCercanos(await resCercanos.json());
+          // Nota: Si configuraste la ruta de "cercanos" en la Lambda, funcionará. Si no, ignorará el error.
+          try {
+            const resCercanos = await fetch(`${API_GATEWAY_URL}/tickets/cercanos?lat=${lat}&lng=${lng}`);
+            if (resCercanos.ok) setTicketsCercanos(await resCercanos.json());
+          } catch (e) {
+            console.warn("Ruta de tickets cercanos no disponible en el API Gateway", e);
+          }
         } else {
           setCoordenadaEnfoque(null);
           setTicketsCercanos([]);
@@ -110,10 +118,15 @@ export default function Dashboard() {
 
   const cambiarEstado = async (ticketId: string, nuevoEstado: string) => {
     try {
-      await fetch(`https://socket-service.politeplant-263a4d5b.eastus.azurecontainerapps.io/api/tickets/${ticketId}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nuevoEstado })
+      const res = await fetch(`${API_GATEWAY_URL}/tickets/${ticketId}`, {
+        method: 'PUT', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ nuevoEstado })
       });
-      if (ticketSeleccionado && ticketSeleccionado.id === ticketId) cerrarDetalle();
+      if (res.ok) {
+        if (ticketSeleccionado && ticketSeleccionado.id === ticketId) cerrarDetalle();
+        fetchTickets(); // Refresca la bandeja con el nuevo estado
+      }
     } catch (error) { console.error(error); }
   };
 
