@@ -39,7 +39,7 @@ interface Ticket {
 }
 
 export default function Dashboard() {
-  const { data: session } = useSession(); // Extraemos la sesión actual de NextAuth
+  const { data: session } = useSession(); 
   
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -57,7 +57,7 @@ export default function Dashboard() {
 
   const fetchTickets = async () => {
     try {
-      const res = await fetch('http://localhost:3000/api/tickets');
+      const res = await fetch('/api/tickets');
       if (res.ok) setTickets(await res.json());
     } catch (error) { 
       console.error(error); 
@@ -68,7 +68,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchTickets();
-    const socket = io({ path: "/api/socket" });
+    const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || "https://socket-service.politeplant-263a4d5b.eastus.azurecontainerapps.io", {
+      transports: ['websocket', 'polling']
+    });
     socket.on('actualizar_dashboard', () => fetchTickets());
     return () => { socket.disconnect(); };
   }, []);
@@ -85,14 +87,14 @@ export default function Dashboard() {
 
   const abrirDetalle = async (id: string, lat: number | null, lng: number | null) => {
     try {
-      const res = await fetch(`http://localhost:3000/api/tickets/${id}`);
+      const res = await fetch(`/api/tickets/${id}`);
       if (res.ok) {
         const detalle = await res.json();
         setTicketSeleccionado(detalle);
         
         if (lat && lng) {
           setCoordenadaEnfoque([lat, lng]);
-          const resCercanos = await fetch(`http://localhost:3000/api/tickets/cercanos?lat=${lat}&lng=${lng}`);
+          const resCercanos = await fetch(`/api/tickets/cercanos?lat=${lat}&lng=${lng}`);
           if (resCercanos.ok) setTicketsCercanos(await resCercanos.json());
         } else {
           setCoordenadaEnfoque(null);
@@ -110,7 +112,7 @@ export default function Dashboard() {
 
   const cambiarEstado = async (ticketId: string, nuevoEstado: string) => {
     try {
-      await fetch(`http://localhost:3000/api/tickets/${ticketId}`, {
+      await fetch(`/api/tickets/${ticketId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nuevoEstado })
       });
       if (ticketSeleccionado && ticketSeleccionado.id === ticketId) cerrarDetalle();
