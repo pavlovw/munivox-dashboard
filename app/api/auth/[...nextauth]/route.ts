@@ -1,5 +1,6 @@
 import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
+import crypto from "crypto";
 
 const handler = NextAuth({
   providers: [
@@ -10,14 +11,55 @@ const handler = NextAuth({
         password: { label: "Contraseña", type: "password" }
       },
       async authorize(credentials) {
-        // Usuarios estáticos para prueba local
-        if (credentials?.email === "admin@munivox.cl" && credentials?.password === "admin123") {
-          return { id: "1", name: "Jefatura Central", email: "admin@munivox.cl", role: "ADMINISTRADOR" };
+        if (!credentials?.email || !credentials?.password) return null;
+
+        const clientId = process.env.COGNITO_CLIENT_ID || "384krgk3lrudtl82h0rn8mpn5i";
+        const clientSecret = process.env.COGNITO_CLIENT_SECRET || "1gmq0chs7sds9cb54bc54vk1bq48dnps16e1bar5flmn00vht4g3";
+
+        // 1. Generar el SECRET_HASH obligatorio de AWS Cognito
+        const secretHash = crypto
+          .createHmac("sha256", clientSecret)
+          .update(credentials.email + clientId)
+          .digest("base64");
+
+        try {
+          // 2. Enviar petición directa a la API de Cognito
+          const response = await fetch("https://cognito-idp.us-east-2.amazonaws.com/", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-amz-json-1.1",
+              "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
+            },
+            body: JSON.stringify({
+              AuthFlow: "USER_PASSWORD_AUTH",
+              ClientId: clientId,
+              AuthParameters: {
+                USERNAME: credentials.email,
+                PASSWORD: credentials.password,
+                SECRET_HASH: secretHash,
+              },
+            }),
+          });
+
+          const data = await response.json();
+
+          // 3. Validar si Cognito entregó el Token de acceso
+          if (data.AuthenticationResult) {
+            return { 
+              id: credentials.email, 
+              name: "Operador Autorizado", 
+              email: credentials.email, 
+              role: "OPERADOR" 
+            };
+          }
+          
+          console.error("Error de credenciales en Cognito:", data.message);
+          return null;
+
+        } catch (error) {
+          console.error("Fallo de conexión a AWS:", error);
+          return null;
         }
-        if (credentials?.email === "operador@munivox.cl" && credentials?.password === "operador123") {
-          return { id: "2", name: "Operador Turno A", email: "operador@munivox.cl", role: "OPERADOR" };
-        }
-        return null;
       }
     })
   ],
@@ -44,5 +86,4 @@ const handler = NextAuth({
   },
 });
 
-// ¡ESTA ES LA LÍNEA CLAVE QUE PIDE EL APP ROUTER DE NEXT.JS!
 export { handler as GET, handler as POST };
