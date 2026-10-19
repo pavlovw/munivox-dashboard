@@ -1,26 +1,71 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  background-color: #F4F7FE;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  padding: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+
+/* Scrollbar minimalista */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+/* Balizas y marcadores de mapa modernos */
+.marcador-emergencia {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.marcador-emergencia::before {
+  content: '';
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  background-color: rgba(244, 63, 94, 0.4);
+  border-radius: 50%;
+  animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.marcador-punto {
+  width: 14px;
+  height: 14px;
+  background-color: #f43f5e;
+  border: 2px solid white;
+  border-radius: 50%;
+  z-index: 10;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+.marcador-fantasma {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  opacity: 0.7;
+}
+.marcador-fantasma-punto {
+  width: 10px;
+  height: 10px;
+  background-color: #94a3b8;
+  border: 2px solid white;
+  border-radius: 50%;
 }
