@@ -57,7 +57,7 @@ export default function Dashboard() {
 
   const fetchTickets = async () => {
     try {
-      const res = await fetch('/api/tickets');
+      const res = await fetch('https://socket-service.politeplant-263a4d5b.eastus.azurecontainerapps.io/api/tickets');
       if (res.ok) setTickets(await res.json());
     } catch (error) { 
       console.error(error); 
@@ -87,14 +87,14 @@ export default function Dashboard() {
 
   const abrirDetalle = async (id: string, lat: number | null, lng: number | null) => {
     try {
-      const res = await fetch(`/api/tickets/${id}`);
+      const res = await fetch(`https://socket-service.politeplant-263a4d5b.eastus.azurecontainerapps.io/api/tickets/${id}`);
       if (res.ok) {
         const detalle = await res.json();
         setTicketSeleccionado(detalle);
         
         if (lat && lng) {
           setCoordenadaEnfoque([lat, lng]);
-          const resCercanos = await fetch(`/api/tickets/cercanos?lat=${lat}&lng=${lng}`);
+          const resCercanos = await fetch(`https://socket-service.politeplant-263a4d5b.eastus.azurecontainerapps.io/api/tickets/cercanos?lat=${lat}&lng=${lng}`);
           if (resCercanos.ok) setTicketsCercanos(await resCercanos.json());
         } else {
           setCoordenadaEnfoque(null);
@@ -112,7 +112,7 @@ export default function Dashboard() {
 
   const cambiarEstado = async (ticketId: string, nuevoEstado: string) => {
     try {
-      await fetch(`/api/tickets/${ticketId}`, {
+      await fetch(`https://socket-service.politeplant-263a4d5b.eastus.azurecontainerapps.io/api/tickets/${ticketId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nuevoEstado })
       });
       if (ticketSeleccionado && ticketSeleccionado.id === ticketId) cerrarDetalle();
