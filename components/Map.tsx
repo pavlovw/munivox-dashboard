@@ -1,12 +1,11 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, GeoJSON, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, GeoJSON, Polygon, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-// Importa el archivo JSON con las coordenadas desde tu carpeta data
-// (Ajusta los puntos "../" según dónde tengas ubicado este archivo map.tsx en tu proyecto)
+// Importa el archivo JSON con las coordenadas de Buin
 import buinBoundary from '../data/buin-boundary.json';
 
 // Configuración de iconos personalizados para Leaflet en Next.js
@@ -36,16 +35,30 @@ interface MapProps {
 }
 
 export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, onTicketSelect }: MapProps) {
-  // Centro aproximado de Buin para la vista inicial
   const centroBuin: [number, number] = [-33.7312, -70.7415];
   const zoomBuin = 13;
 
-  // Estilo para el límite comunal: Borde negro y relleno sutil
-  const estiloComuna = {
+  // 1. Extraer las coordenadas del JSON de Buin y transformarlas de [lng, lat] a [lat, lng] para Leaflet
+  const buinCoordsLatLon = (buinBoundary.geometry.coordinates[0] as [number, number][]).map(
+    (coord) => [coord[1], coord[0]] as [number, number]
+  );
+
+  // 2. Definir un rectángulo gigante que cubra todo el mundo/región exterior
+  const mundoBounds: [number, number][] = [
+    [-90, -180],
+    [-90, 180],
+    [90, 180],
+    [90, -180]
+  ];
+
+  // 3. Crear la máscara invertida: El primer anillo es el mundo exterior, el segundo anillo (hueco) es Buin
+  const mascaraInvertida = [mundoBounds, buinCoordsLatLon];
+
+  // Estilo para el borde de Buin (interior completamente transparente)
+  const estiloBordeBuin = {
     color: '#000000',       // Borde negro sólido
-    weight: 2.5,            // Grosor del borde
-    fillColor: '#0284c7',   // Color interno de la comuna
-    fillOpacity: 0.15       // Transparencia del relleno
+    weight: 3,              // Grosor del borde
+    fill: false             // Interior transparente (sin relleno de color)
   };
 
   return (
@@ -67,10 +80,20 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {/* RENDERIZADO DEL LÍMITE COMUNAL DESDE EL JSON EXTERNO */}
+          {/* MÁSCARA OSCURA EXTERIOR (Todo lo que está fuera de Buin con sombra 0.4) */}
+          <Polygon
+            positions={mascaraInvertida as any}
+            pathOptions={{
+              color: 'transparent', // Sin borde en el rectángulo exterior global
+              fillColor: '#000000', // Color negro para la sombra
+              fillOpacity: 0.4,     // Opacidad del 40% pedida
+            }}
+          />
+
+          {/* LÍMITE COMUNAL DE BUIN (Borde negro limpio, interior transparente) */}
           <GeoJSON 
             data={buinBoundary as any} 
-            style={estiloComuna} 
+            style={estiloBordeBuin} 
           />
 
           {/* MARCADORES DE TICKETS REALES */}
