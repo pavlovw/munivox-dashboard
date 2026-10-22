@@ -424,12 +424,12 @@ export default function Dashboard() {
                                 <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                                   <FiPhone /> {ticket.ciudadano?.telefono?.replace('569', '+56 9 ')}
                                 </span>
-                              </div>
                             </div>
-                          )
-                        })
-                      )}
-                    </div>
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
                   </>
                 )}
 
@@ -572,40 +572,40 @@ export default function Dashboard() {
 
           {/* RENDERIZADO DEL TABLERO KANBAN */}
           {vistaActiva === 'KANBAN' && (
-            <div style={{ flex: 1, backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '24px', padding: '24px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ marginBottom: '20px' }}>
-                <h2 style={{ fontSize: '16px', fontWeight: 900, color: '#1e293b', margin: '0 0 4px 0' }}>Flujo Operativo de Monitoreo</h2>
-                <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>Haz clic en un ticket para ver su detalle e inspeccionarlo en el visor territorial.</p>
+              <div style={{ flex: 1, backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '24px', padding: '24px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ marginBottom: '20px' }}>
+                  <h2 style={{ fontSize: '16px', fontWeight: 900, color: '#1e293b', margin: '0 0 4px 0' }}>Flujo Operativo de Monitoreo</h2>
+                  <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>Haz clic en un ticket para ver su detalle e inspeccionarlo en el visor territorial.</p>
+                </div>
+                <Kanban 
+                  tickets={ticketsFiltrados} 
+                  onTicketSelect={(id) => {
+                    const t = ticketsFiltrados.find(x => x.id === id);
+                    if(t) {
+                      abrirDetalle(t.id, t.latitud, t.longitud);
+                      setVistaActiva('MAPA');
+                    }
+                  }} 
+                />
               </div>
-              <Kanban 
-                tickets={ticketsFiltrados} 
-                onTicketSelect={(id) => {
-                  const t = ticketsFiltrados.find(x => x.id === id);
-                  if(t) {
-                    abrirDetalle(t.id, t.latitud, t.longitud);
-                    setVistaActiva('MAPA');
-                  }
-                }} 
-              />
-            </div>
-          )}
+            )}
 
           {/* RENDERIZADO DE ESTADÍSTICAS */}
           {vistaActiva === 'ESTADISTICA' && (
-            <div style={{ flex: 1, overflow: 'hidden' }}>
-              <Estadisticas tickets={ticketsFiltrados} />
-            </div>
+              <div style={{ flex: 1, overflow: 'hidden' }}>
+                <Estadisticas tickets={ticketsFiltrados} />
+              </div>
           )}
 
           {/* RENDERIZADO DEL PANEL DE ADMINISTRACIÓN (Solo si eres admin) */}
           {vistaActiva === 'ADMINISTRACION' && (session?.user as any)?.role === 'ADMINISTRADOR' && (
-            <div style={{ flex: 1, overflow: 'hidden' }}>
-              <AdminPanel />
-            </div>
+              <div style={{ flex: 1, overflow: 'hidden' }}>
+                <AdminPanel />
+              </div>
           )}
 
         </div>
       </main>
-    </div>
+  </div>
   );
 }
