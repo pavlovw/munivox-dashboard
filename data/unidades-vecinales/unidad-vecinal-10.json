@@ -1,0 +1,11 @@
+﻿{
+  "type": "Feature",
+  "properties": {
+    "id": 10,
+    "nombre": "Unidad Vecinal 10"
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": []
+  }
+}
