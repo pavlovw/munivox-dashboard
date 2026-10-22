@@ -14,8 +14,6 @@ import Kanban from '../components/Kanban';
 import Estadisticas from '../components/Estadisticas';
 import AdminPanel from '../components/AdminPanel';
 
-
-
 const MapComponent = dynamic(() => import('../components/Map'), { 
   ssr: false,
   loading: () => (
