@@ -1,5 +1,6 @@
 "use client";
 
+import React, { useState, useMemo } from 'react';
 import { 
   FiClock, 
   FiEye, 
@@ -25,11 +26,11 @@ export interface TicketKanban {
   createdAt?: string | Date;
   usuarioNombre?: string;
   tieneImagenes?: boolean;
-  [key: string]: any; // Permite cualquier otra propiedad proveniente de page.tsx
+  [key: string]: any;
 }
 
 interface KanbanProps {
-  tickets: any[]; // Permite recibir el arreglo de tickets de page.tsx sin conflictos de tipos
+  tickets: any[];
   onTicketSelect: (id: string) => void;
   onEstadoChange?: (ticketId: string, nuevoEstado: string) => void;
 }
@@ -132,7 +133,7 @@ export default function Kanban({ tickets, onTicketSelect, onEstadoChange }: Kanb
       {/* BARRA SUPERIOR DE CONTROL DEL TABLERO KANBAN */}
       <div style={{ 
         display: 'flex', 
-        justify: 'space-between', 
+        justifyContent: 'space-between', 
         alignItems: 'center', 
         flexWrap: 'wrap',
         gap: '12px',
@@ -207,7 +208,7 @@ export default function Kanban({ tickets, onTicketSelect, onEstadoChange }: Kanb
               <div style={{ 
                 padding: '14px 16px', 
                 display: 'flex', 
-                justify: 'space-between', 
+                justifyContent: 'space-between', 
                 alignItems: 'center', 
                 backgroundColor: '#ffffff', 
                 borderTopLeftRadius: '16px', 
