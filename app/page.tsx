@@ -587,7 +587,7 @@ export default function Dashboard() {
                     }
                   }} 
                 />
-              </div>
+              </div> //ola
             )}
 
           {/* RENDERIZADO DE ESTADÍSTICAS */}
