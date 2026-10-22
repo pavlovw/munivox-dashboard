@@ -25,14 +25,33 @@ function MapUpdater({ center }: { center: [number, number] | null }) {
   return null;
 }
 
-// Iconos geométricos institucionales
-const iconoPendiente = L.divIcon({ className: 'marcador-emergencia', html: '<div class="marcador-punto"></div>', iconSize: [28, 28], iconAnchor: [14, 14] });
-const iconoFantasma = L.divIcon({ className: 'marcador-fantasma', html: '<div class="marcador-fantasma-punto"></div>', iconSize: [10, 10], iconAnchor: [5, 5] });
-const iconoOperacion = new L.Icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
-});
+// Creador de iconos tácticos C4 con colores específicos
+const crearIcono = (colorBase: string, border: string) => {
+  return L.divIcon({
+    className: 'custom-pin-c4',
+    html: `<div style="
+      background-color: ${colorBase}; 
+      width: 22px; 
+      height: 22px; 
+      border-radius: 50%; 
+      border: 3px solid ${border}; 
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    ">
+      <div style="width: 6px; height: 6px; background-color: white; border-radius: 50%;"></div>
+    </div>`,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11]
+  });
+};
+
+// Paleta de Semáforo Operativo
+const iconListoDespacho = crearIcono('#dc2626', '#fca5a5'); // Rojo (Listo para enviar móvil)
+const iconIncompleto = crearIcono('#f59e0b', '#fde68a'); // Naranja (Falta Foto)
+const iconTerreno = crearIcono('#2563eb', '#bfdbfe'); // Azul (Derivado a departamento)
+const iconResuelto = crearIcono('#10b981', '#a7f3d0'); // Verde (Cerrado - desaparecerá a las 24h)
 
 interface MapProps {
   tickets: any[];
@@ -59,18 +78,45 @@ export default function Map({ tickets, fantasmas, coordenadaSeleccionada, onTick
       {/* DIBUJAR INCIDENTES ACTIVOS (Los que ves en la lista) */}
       {tickets.map(ticket => {
         if (!ticket.latitud || !ticket.longitud) return null;
-        const esPendiente = ticket.estado === 'PENDIENTE';
         
+        // Lógica de semaforización
+        let iconoUsar = iconListoDespacho;
+        let estadoLabel = 'LISTO PARA DESPACHO';
+        let labelColor = '#dc2626'; 
+
+        if (ticket.estado === 'PENDIENTE') {
+          const tieneFoto = ticket.evidencias && ticket.evidencias.length > 0;
+          if (!tieneFoto) {
+            iconoUsar = iconIncompleto;
+            estadoLabel = 'INCOMPLETO (SIN FOTO)';
+            labelColor = '#d97706'; 
+          }
+        } else if (ticket.estado === 'DERIVADO' || ticket.estado === 'DESPACHADO' || ticket.estado === 'EN_REVISION') {
+          iconoUsar = iconTerreno;
+          estadoLabel = 'EN TERRENO';
+          labelColor = '#2563eb'; 
+        } else if (ticket.estado === 'RESUELTO') {
+          iconoUsar = iconResuelto;
+          estadoLabel = 'RESUELTO';
+          labelColor = '#059669'; 
+        }
+
         return (
           <Marker 
             key={ticket.id} 
             position={[ticket.latitud, ticket.longitud]} 
-            icon={esPendiente ? iconoPendiente : iconoOperacion}
+            icon={iconoUsar}
             eventHandlers={{ click: () => onTicketSelect(ticket.id) }}
           >
             <Popup>
-              <strong className={esPendiente ? "text-red-700" : "text-blue-700"}>{ticket.codigoTicket}</strong><br/>
-              <span className="text-[10px] uppercase font-bold text-gray-500">{ticket.estado.replace('_', ' ')}</span>
+              <strong style={{ color: labelColor, fontSize: '14px', display: 'block' }}>{ticket.codigoTicket}</strong>
+              <span style={{ fontSize: '10px', textTransform: 'uppercase', fontWeight: 'bold', color: '#64748b' }}>
+                {estadoLabel}
+              </span>
+              <br/>
+              <span style={{ fontSize: '11px', color: '#475569', display: 'block', marginTop: '4px' }}>
+                {ticket.categoria?.nombre || 'General'}
+              </span>
             </Popup>
           </Marker>
         );
@@ -83,7 +129,7 @@ export default function Map({ tickets, fantasmas, coordenadaSeleccionada, onTick
           <Marker 
             key={fantasma.id} 
             position={[fantasma.latitud, fantasma.longitud]} 
-            icon={iconoFantasma}
+            icon={iconResuelto}
             eventHandlers={{ click: () => onTicketSelect(fantasma.id) }}
           >
             <Popup>

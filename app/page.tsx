@@ -7,7 +7,7 @@ import { useSession, signOut } from 'next-auth/react';
 import { 
   FiMap, FiGrid, FiActivity, FiSearch, FiShield, 
   FiClock, FiPhone, FiAlertTriangle, FiArrowLeft, FiRadio, FiCpu,
-  FiSettings, FiLogOut
+  FiSettings, FiLogOut, FiSend, FiMessageSquare, FiImage
 } from 'react-icons/fi';
 
 import Kanban from '../components/Kanban';
@@ -34,6 +34,8 @@ interface Ticket {
   descripcionUsuario: string;
   createdAt: string;
   ciudadano: { telefono: string };
+  categoria?: { nombre: string };
+  departamento?: { nombre: string };
   evidencias?: any[];
   historial?: any[];
 }
@@ -54,6 +56,8 @@ export default function Dashboard() {
   const [ticketSeleccionado, setTicketSeleccionado] = useState<Ticket | null>(null);
   const [ticketsCercanos, setTicketsCercanos] = useState<any[]>([]);
   const [coordenadaEnfoque, setCoordenadaEnfoque] = useState<[number, number] | null>(null);
+
+  const [departamentoDerivacion, setDepartamentoDerivacion] = useState("SEGURIDAD PÚBLICA");
 
   const API_GATEWAY_URL = "https://nn4p1ybmu2.execute-api.us-east-2.amazonaws.com";
 
@@ -93,6 +97,10 @@ export default function Dashboard() {
         const detalle = await res.json();
         setTicketSeleccionado(detalle);
         
+        if (detalle.departamento?.nombre) {
+          setDepartamentoDerivacion(detalle.departamento.nombre);
+        }
+        
         if (lat && lng) {
           setCoordenadaEnfoque([lat, lng]);
           // Nota: Si configuraste la ruta de "cercanos" en la Lambda, funcionará. Si no, ignorará el error.
@@ -127,6 +135,20 @@ export default function Dashboard() {
         if (ticketSeleccionado && ticketSeleccionado.id === ticketId) cerrarDetalle();
         fetchTickets(); // Refresca la bandeja con el nuevo estado
       }
+
+    } catch (error) { console.error(error); }
+  };
+
+  const derivarTicket = async (ticketId: string) => {
+    try {
+      const res = await fetch(`${API_GATEWAY_URL}/tickets/${ticketId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ nuevoEstado: 'DERIVADO', departamentoAsignado: departamentoDerivacion })
+      });
+      if (res.ok) {
+        fetchTickets();
+        if (ticketSeleccionado && ticketSeleccionado.id === ticketId) cerrarDetalle();
+      }
     } catch (error) { console.error(error); }
   };
 
@@ -144,6 +166,57 @@ export default function Dashboard() {
       case 'RESUELTO': return { backgroundColor: '#ecfdf5', color: '#059669', borderColor: '#a7f3d0' };
       default: return { backgroundColor: '#f1f5f9', color: '#475569', borderColor: '#e2e8f0' };
     }
+  };
+
+  const obtenerEstadoVisual = (t: Ticket) => {
+    if (t.estado === 'PENDIENTE') {
+       const tieneGPS = t.latitud !== null;
+       const tieneFoto = t.evidencias && t.evidencias.length > 0;
+       
+       if (!tieneGPS || !tieneFoto) {
+         return { label: 'INCOMPLETO (GPS/FOTO)', bg: '#fef3c7', text: '#d97706', border: '#fde68a' }; 
+       }
+       return { label: 'LISTO PARA DESPACHO', bg: '#fee2e2', text: '#dc2626', border: '#fecaca' }; 
+    }
+    if (t.estado === 'DERIVADO' || t.estado === 'EN_REVISION' || t.estado === 'DESPACHADO') {
+      return { label: 'EN TERRENO', bg: '#eff6ff', text: '#2563eb', border: '#bfdbfe' }; 
+    }
+    if (t.estado === 'RESUELTO') {
+      return { label: 'RESUELTO', bg: '#ecfdf5', text: '#059669', border: '#a7f3d0' }; 
+    }
+    return { label: t.estado, bg: '#f1f5f9', text: '#475569', border: '#e2e8f0' };
+  };
+
+  const renderizarChat = (texto: string) => {
+    const partes = texto.split(/(\[Usuario\]:|\[Sistema\]:)/g).filter(Boolean);
+    let mensajes = [];
+    let autorActual = 'Ciudadano';
+
+    for (let i = 0; i < partes.length; i++) {
+      const parte = partes[i].trim();
+      if (!parte) continue;
+      if (parte === '[Usuario]:') autorActual = 'Ciudadano';
+      else if (parte === '[Sistema]:') autorActual = 'MuniVox';
+      else mensajes.push({ autor: autorActual, texto: parte });
+    }
+
+    return mensajes.map((m, idx) => (
+      <div key={idx} style={{ 
+        alignSelf: m.autor === 'Ciudadano' ? 'flex-end' : 'flex-start',
+        backgroundColor: m.autor === 'Ciudadano' ? '#dcf8c6' : '#ffffff',
+        border: '1px solid #e2e8f0',
+        padding: '8px 12px',
+        borderRadius: m.autor === 'Ciudadano' ? '12px 0px 12px 12px' : '0px 12px 12px 12px',
+        maxWidth: '85%',
+        fontSize: '11px',
+        color: '#1e293b',
+        marginBottom: '6px',
+        boxShadow: '0 1px 1px rgba(0,0,0,0.05)'
+      }}>
+        <strong style={{ display: 'block', fontSize: '9px', color: '#64748b', marginBottom: '2px' }}>{m.autor}</strong>
+        {m.texto}
+      </div>
+    ));
   };
 
   return (
@@ -281,9 +354,8 @@ export default function Dashboard() {
                             style={{ flex: 1, fontSize: '11px', fontWeight: 600, padding: '10px', backgroundColor: '#F4F7FE', border: '1px solid transparent', borderRadius: '14px', outline: 'none', color: '#475569', cursor: 'pointer' }}
                           >
                             <option value="TODOS">Estado: Todos</option>
-                            <option value="PENDIENTE">Pendientes</option>
-                            <option value="EN_REVISION">En Revisión</option>
-                            <option value="DESPACHADO">Despachados</option>
+                            <option value="PENDIENTE">Pendientes (Despacho)</option>
+                            <option value="DERIVADO">En Terreno</option>
                           </select>
                           <select 
                             value={filtroPrioridad}
@@ -312,33 +384,39 @@ export default function Dashboard() {
                           <p style={{ fontSize: '10px', color: '#94a3b8', margin: '4px 0 0 0' }}>Prueba ajustando los filtros</p>
                         </div>
                       ) : (
-                        ticketsFiltrados.map((ticket) => (
-                          <div 
-                            key={ticket.id} 
-                            onClick={() => abrirDetalle(ticket.id, ticket.latitud, ticket.longitud)} 
-                            style={{ backgroundColor: 'white', border: '1px solid #f1f5f9', padding: '16px', borderRadius: '16px', cursor: 'pointer', transition: 'all 0.2s', boxShadow: '0 2px 4px rgba(0,0,0,0.01)' }}
-                          >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                              <span style={{ fontSize: '12px', fontWeight: 900, color: '#1e293b' }}>{ticket.codigoTicket}</span>
-                              <span style={{ fontSize: '9px', fontWeight: 900, padding: '4px 10px', borderRadius: '10px', border: '1px solid', ...obtenerEstiloPrioridad(ticket.prioridadIA) }}>
-                                {ticket.prioridadIA}
-                              </span>
+                        ticketsFiltrados.map((ticket) => {
+                          const uiState = obtenerEstadoVisual(ticket);
+                          return (
+                            <div 
+                              key={ticket.id} 
+                              onClick={() => abrirDetalle(ticket.id, ticket.latitud, ticket.longitud)} 
+                              style={{ backgroundColor: 'white', border: '1px solid #f1f5f9', padding: '16px', borderRadius: '16px', cursor: 'pointer', transition: 'all 0.2s', boxShadow: '0 2px 4px rgba(0,0,0,0.01)' }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                <span style={{ fontSize: '12px', fontWeight: 900, color: '#1e293b' }}>{ticket.codigoTicket}</span>
+                                <span style={{ fontSize: '9px', fontWeight: 900, padding: '4px 10px', borderRadius: '10px', border: '1px solid', ...obtenerEstiloPrioridad(ticket.prioridadIA) }}>
+                                  {ticket.prioridadIA}
+                                </span>
+                              </div>
+                              
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px' }}>
+                                <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#0284c7' }}></div>
+                                <span style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>
+                                  {ticket.categoria?.nombre || 'Clasificación Pendiente'}
+                                </span>
+                              </div>
+                              
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '10px', borderTop: '1px solid #f8fafc', fontSize: '11px' }}>
+                                <span style={{ padding: '4px 10px', borderRadius: '8px', border: `1px solid ${uiState.border}`, backgroundColor: uiState.bg, color: uiState.text, fontSize: '9px', fontWeight: 900, letterSpacing: '0.5px' }}>
+                                  {uiState.label}
+                                </span>
+                                <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                  <FiPhone /> {ticket.ciudadano?.telefono?.replace('569', '+56 9 ')}
+                                </span>
+                              </div>
                             </div>
-                            
-                            <p style={{ fontSize: '11px', color: '#475569', margin: '0 0 12px 0', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                              {ticket.analisisIA}
-                            </p>
-                            
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '10px', borderTop: '1px solid #f8fafc', fontSize: '11px' }}>
-                              <span style={{ padding: '3px 8px', borderRadius: '8px', border: '1px solid', fontSize: '10px', fontWeight: 'bold', ...obtenerEstiloEstado(ticket.estado) }}>
-                                {ticket.estado.replace('_', ' ')}
-                              </span>
-                              <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: '10px' }}>
-                                {ticket.ciudadano?.telefono?.replace('569', '+56 9 ')}
-                              </span>
-                            </div>
-                          </div>
-                        ))
+                          )
+                        })
                       )}
                     </div>
                   </>
@@ -347,60 +425,64 @@ export default function Dashboard() {
                 {ticketSeleccionado && (
                   <div style={{ display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'white' }}>
                     
-                    <div style={{ padding: '20px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F8FAFC' }}>
                       <div>
-                        <span style={{ fontSize: '9px', color: '#0284c7', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 900, display: 'block', marginBottom: '2px' }}>EXPEDIENTE OPERATIVO</span>
-                        <h3 style={{ fontSize: '14px', fontWeight: 900, color: '#1e293b', margin: 0 }}>{ticketSeleccionado.codigoTicket}</h3>
+                        <span style={{ fontSize: '9px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 900, display: 'block', marginBottom: '2px' }}>EXPEDIENTE OPERATIVO</span>
+                        <h3 style={{ fontSize: '16px', fontWeight: 900, color: '#1e293b', margin: 0 }}>{ticketSeleccionado.codigoTicket}</h3>
                       </div>
                       <button 
                         onClick={cerrarDetalle} 
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#475569', fontSize: '11px', fontWeight: 'bold', backgroundColor: '#F4F7FE', border: 'none', padding: '8px 14px', borderRadius: '12px', cursor: 'pointer' }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#475569', fontSize: '11px', fontWeight: 'bold', backgroundColor: 'white', border: '1px solid #e2e8f0', padding: '8px 14px', borderRadius: '12px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
                       >
                         <FiArrowLeft size={14} /> Volver
                       </button>
                     </div>
 
-                    <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', backgroundColor: '#F9FAFC' }}>
+                    <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', backgroundColor: '#ffffff' }}>
                       
-                      {ticketSeleccionado.evidencias && ticketSeleccionado.evidencias.length > 0 && (
-                        <div>
-                          <h4 style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 8px 0' }}>EVIDENCIA GRÁFICA</h4>
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                            {ticketSeleccionado.evidencias.map((ev: any) => (
-                              <img key={ev.id} src={ev.url} alt="Evidencia" style={{ height: '110px', width: '100%', objectFit: 'cover', borderRadius: '14px', border: '1px solid #e2e8f0' }} />
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      <div>
-                        <h4 style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 8px 0' }}>DECLARACIÓN DEL CIUDADANO</h4>
-                        <div style={{ backgroundColor: 'white', padding: '14px', border: '1px solid #e2e8f0', borderRadius: '14px', fontSize: '11px', color: '#475569', fontStyle: 'italic', boxShadow: '0 1px 2px rgba(0,0,0,0.01)' }}>
-                          "{ticketSeleccionado.descripcionUsuario}"
-                        </div>
-                      </div>
-
-                      <div>
-                        <h4 style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <FiCpu size={14} color="#d97706" /> DICTAMEN DE INTELIGENCIA ARTIFICIAL
+                      <div style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '16px', padding: '16px', boxShadow: '0 4px 6px -1px rgba(217,119,6,0.1)' }}>
+                         <h4 style={{ fontSize: '10px', fontWeight: 900, color: '#d97706', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <FiCpu size={14} /> DICTAMEN DE INTELIGENCIA ARTIFICIAL
                         </h4>
-                        <div style={{ backgroundColor: '#fffbeb', padding: '14px', border: '1px solid #fde68a', borderRadius: '14px', fontSize: '11px', color: '#92400e', lineHeight: 1.5, fontWeight: 500 }}>
+                        <p style={{ fontSize: '12px', color: '#92400e', lineHeight: 1.5, margin: 0, fontWeight: 500 }}>
                           {ticketSeleccionado.analisisIA}
-                        </div>
+                        </p>
                       </div>
 
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                        <div style={{ backgroundColor: 'white', padding: '12px', border: '1px solid #e2e8f0', borderRadius: '14px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                          <span style={{ fontSize: '9px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 900, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}><FiPhone size={10} color="#0ea5e9" /> TELÉFONO</span>
-                          <span style={{ fontSize: '11px', fontFamily: 'monospace', fontWeight: 'bold', color: '#1e293b' }}>{ticketSeleccionado.ciudadano.telefono.replace('569', '+56 9 ')}</span>
+                        <div style={{ backgroundColor: '#F8FAFC', padding: '12px', border: '1px solid #e2e8f0', borderRadius: '14px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                          <span style={{ fontSize: '9px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 900, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}><FiPhone size={10} color="#0ea5e9" /> CIUDADANO</span>
+                          <span style={{ fontSize: '12px', fontFamily: 'monospace', fontWeight: 'bold', color: '#1e293b' }}>{ticketSeleccionado.ciudadano.telefono.replace('569', '+56 9 ')}</span>
                         </div>
-                        <div style={{ backgroundColor: 'white', padding: '12px', border: '1px solid #e2e8f0', borderRadius: '14px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                        <div style={{ backgroundColor: '#F8FAFC', padding: '12px', border: '1px solid #e2e8f0', borderRadius: '14px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                           <span style={{ fontSize: '9px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 900, marginBottom: '4px' }}>PRIORIDAD</span>
                           <span style={{ fontSize: '10px', fontWeight: 900, padding: '3px 8px', borderRadius: '8px', border: '1px solid', width: 'fit-content', ...obtenerEstiloPrioridad(ticketSeleccionado.prioridadIA) }}>
                             {ticketSeleccionado.prioridadIA}
                           </span>
                         </div>
                       </div>
+
+                      <div>
+                        <h4 style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <FiMessageSquare size={14} color="#10b981" /> HISTORIAL DE CONVERSACIÓN
+                        </h4>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: '#e2e8f0', padding: '16px', borderRadius: '16px', backgroundImage: 'url("https://www.transparenttextures.com/patterns/cubes.png")' }}>
+                          {renderizarChat(ticketSeleccionado.descripcionUsuario)}
+                        </div>
+                      </div>
+
+                      {ticketSeleccionado.evidencias && ticketSeleccionado.evidencias.length > 0 && (
+                        <div>
+                          <h4 style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <FiImage size={14} color="#6366f1" /> EVIDENCIA GRÁFICA
+                          </h4>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                            {ticketSeleccionado.evidencias.map((ev: any) => (
+                              <img key={ev.id} src={ev.url} alt="Evidencia" style={{ height: '140px', width: '100%', objectFit: 'cover', borderRadius: '14px', border: '1px solid #e2e8f0' }} />
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
                       <div>
                         <h4 style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -423,20 +505,34 @@ export default function Dashboard() {
                       </div>
                     </div>
 
-                    <div style={{ padding: '16px 20px', backgroundColor: 'white', borderTop: '1px solid #f1f5f9' }}>
-                      <label style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px', display: 'block' }}>EJECUTAR ORDEN OPERATIVA:</label>
-                      <select 
-                        value={ticketSeleccionado.estado}
-                        onChange={(e) => cambiarEstado(ticketSeleccionado.id, e.target.value)}
-                        style={{ width: '100%', padding: '12px', backgroundColor: '#F4F7FE', color: '#1e293b', border: '1px solid #e2e8f0', fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', borderRadius: '14px', outline: 'none', cursor: 'pointer' }}
-                      >
-                        <option value="PENDIENTE">Estado: Pendiente</option>
-                        <option value="EN_REVISION">Estado: En Revisión</option>
-                        <option value="DESPACHADO">Orden: Despachar Móvil</option>
-                        <option value="RESUELTO">Cerrar Caso: Resuelto</option>
-                        <option value="DESCARTADO">Anular: Descartar Caso</option>
-                      </select>
-                    </div>
+                    {/* PANEL DE DESPACHO INTERACTIVO */}
+                    {ticketSeleccionado.estado !== 'RESUELTO' && (
+                      <div style={{ padding: '20px', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+                        <label style={{ fontSize: '10px', fontWeight: 900, color: '#475569', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px', display: 'block' }}>PANEL DE DESPACHO MUNICIPAL</label>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <select 
+                            value={departamentoDerivacion}
+                            onChange={(e) => setDepartamentoDerivacion(e.target.value)}
+                            style={{ width: '100%', padding: '14px', backgroundColor: 'white', color: '#1e293b', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, borderRadius: '12px', outline: 'none', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
+                          >
+                            <option value="SEGURIDAD PÚBLICA">Derivar a: SEGURIDAD PÚBLICA</option>
+                            <option value="DIMAO">Derivar a: DIMAO (Aseo y Ornato)</option>
+                            <option value="TRÁNSITO">Derivar a: DIRECCIÓN DE TRÁNSITO</option>
+                            <option value="DOM">Derivar a: OBRAS MUNICIPALES (DOM)</option>
+                            <option value="DIDECO">Derivar a: DIDECO</option>
+                          </select>
+                          
+                          <button 
+                            onClick={() => derivarTicket(ticketSeleccionado.id)}
+                            style={{ width: '100%', backgroundColor: '#2563eb', color: 'white', padding: '14px', borderRadius: '12px', border: 'none', fontWeight: 900, fontSize: '13px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(37,99,235,0.3)', transition: 'background-color 0.2s' }}
+                            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#1d4ed8'}
+                            onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#2563eb'}
+                          >
+                            <FiSend size={16} /> CONFIRMAR DESPACHO A TERRENO
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                   </div>
                 )}
