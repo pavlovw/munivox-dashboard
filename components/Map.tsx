@@ -8,49 +8,49 @@ import 'leaflet/dist/leaflet.css';
 // Importa el archivo JSON general de la comuna de Buin
 import buinBoundary from '../data/buin-boundary.json';
 
-// Importa las 19 unidades vecinales organizadas en la carpeta data/unidades-vecinales/
-import uv1 from '../data/unidades-vecinales/unidad-vecinal-1.json'; // BUIN PONIENTE X
-import uv2 from '../data/unidades-vecinales/unidad-vecinal-2.json'; // NUEVO LINDEROS X
-import uv3 from '../data/unidades-vecinales/unidad-vecinal-3.json'; // BUIN CENTRO X
-import uv4 from '../data/unidades-vecinales/unidad-vecinal-4.json'; // LOS CERRILLOS X
-import uv5 from '../data/unidades-vecinales/unidad-vecinal-5.json'; // MAIPO X
-import uv6 from '../data/unidades-vecinales/unidad-vecinal-6.json'; // RURAL NORTE X
-import uv7 from '../data/unidades-vecinales/unidad-vecinal-7.json'; // LINDEROS X
-import uv8 from '../data/unidades-vecinales/unidad-vecinal-8.json'; // LOS GUINDOS X
-import uv9 from '../data/unidades-vecinales/unidad-vecinal-9.json'; // BUIN SUR X
-import uv10 from '../data/unidades-vecinales/unidad-vecinal-10.json'; // ALTO JAHUEL X
-import uv11 from '../data/unidades-vecinales/unidad-vecinal-11.json'; // EL RECURSO X
-import uv12 from '../data/unidades-vecinales/unidad-vecinal-12.json'; // BUIN ORIENTE X
-import uv13 from '../data/unidades-vecinales/unidad-vecinal-13.json'; // FLOR DE MAIPO X
-import uv14 from '../data/unidades-vecinales/unidad-vecinal-14.json'; // LA ESTANCILLA ------
-import uv15 from '../data/unidades-vecinales/unidad-vecinal-15.json'; // CERVERA X
-import uv16 from '../data/unidades-vecinales/unidad-vecinal-16.json'; // BUIN NORTE X
-import uv17 from '../data/unidades-vecinales/unidad-vecinal-17.json'; // VILUCO X
-import uv18 from '../data/unidades-vecinales/unidad-vecinal-18.json'; // VALDIVIA DE PAINE
-import uv19 from '../data/unidades-vecinales/unidad-vecinal-19.json'; // NUEVO BUIN X
+// Imports mapeados al archivo JSON que realmente contiene sus coordenadas correspondientes
+import uvBuinCentro from '../data/unidades-vecinales/unidad-vecinal-3.json'; // uv3 -> Buin Centro
+import uvBuinPoniente from '../data/unidades-vecinales/unidad-vecinal-1.json'; // uv1 -> Buin Poniente
+import uvBuinNorte from '../data/unidades-vecinales/unidad-vecinal-16.json'; // uv16 -> Buin Norte
+import uvBuinOriente from '../data/unidades-vecinales/unidad-vecinal-12.json'; // uv12 -> Buin Oriente
+import uvBuinSur from '../data/unidades-vecinales/unidad-vecinal-9.json'; // uv9 -> Buin Sur
+import uvNuevoBuin from '../data/unidades-vecinales/unidad-vecinal-19.json'; // uv19 -> Nuevo Buin
+import uvMaipo from '../data/unidades-vecinales/unidad-vecinal-5.json'; // uv5 -> Maipo
+import uvAltoJahuel from '../data/unidades-vecinales/unidad-vecinal-10.json'; // uv10 -> Alto Jahuel
+import uvLinderos from '../data/unidades-vecinales/unidad-vecinal-7.json'; // uv7 -> Linderos
+import uvViluco from '../data/unidades-vecinales/unidad-vecinal-17.json'; // uv17 -> Viluco
+import uvValdiviaDePaine from '../data/unidades-vecinales/unidad-vecinal-18.json'; // uv18 -> Valdivia de Paine
+import uvCervera from '../data/unidades-vecinales/unidad-vecinal-15.json'; // uv15 -> Cervera
+import uvLaEstancilla from '../data/unidades-vecinales/unidad-vecinal-14.json'; // uv14 -> La Estancilla
+import uvNuevoLinderos from '../data/unidades-vecinales/unidad-vecinal-2.json'; // uv2 -> Nuevo Linderos
+import uvFlorDeMaipo from '../data/unidades-vecinales/unidad-vecinal-13.json'; // uv13 -> Flor de Maipo
+import uvLosGuindos from '../data/unidades-vecinales/unidad-vecinal-8.json'; // uv8 -> Los Guindos
+import uvElRecurso from '../data/unidades-vecinales/unidad-vecinal-11.json'; // uv11 -> El Recurso
+import uvRuralNorte from '../data/unidades-vecinales/unidad-vecinal-6.json'; // uv6 -> Rural Norte
+import uvElCerrillo from '../data/unidades-vecinales/unidad-vecinal-4.json'; // uv4 -> El Cerrillo
 
-// Lista oficial de las 19 unidades vecinales mapeadas con sus respectivos archivos JSON
+// Lista oficial de las 19 unidades vecinales ordenadas exactamente del 1 al 19
 const UNIDADES_VECINALES = [
   { id: 'TODAS', nombre: 'Ver toda la comuna', data: null },
-  { id: '3', nombre: '3. Buin Centro', data: uv3 },
-  { id: '1', nombre: '1. Buin Poniente', data: uv1 },
-  { id: '16', nombre: '16. Buin Norte', data: uv16 },
-  { id: '12', nombre: '12. Buin Oriente', data: uv12 },
-  { id: '9', nombre: '9. Buin Sur', data: uv9 },
-  { id: '19', nombre: '19. Nuevo Buin', data: uv19 },
-  { id: '5', nombre: '5. Maipo', data: uv5 },
-  { id: '10', nombre: '10. Alto Jahuel', data: uv10 },
-  { id: '7', nombre: '7. Linderos', data: uv7 },
-  { id: '17', nombre: '17. Viluco', data: uv17 },
-  { id: '18', nombre: '18. Valdivia de Paine', data: uv18 },
-  { id: '15', nombre: '15. Cervera', data: uv15 },
-  { id: '14', nombre: '14. La Estancilla', data: uv14 },
-  { id: '2', nombre: '2. Nuevo Linderos', data: uv2 },
-  { id: '13', nombre: '13. Flor de Maipo', data: uv13 },
-  { id: '8', nombre: '8. Los Guindos', data: uv8 },
-  { id: '11', nombre: '11. El Recurso', data: uv11 },
-  { id: '6', nombre: '6. Rural Norte', data: uv6 },
-  { id: '4', nombre: '4. El Cerrillo', data: uv4 },
+  { id: '1', nombre: '1. BUIN CENTRO', data: uvBuinCentro },
+  { id: '2', nombre: '2. BUIN PONIENTE', data: uvBuinPoniente },
+  { id: '3', nombre: '3. BUIN NORTE', data: uvBuinNorte },
+  { id: '4', nombre: '4. BUIN ORIENTE', data: uvBuinOriente },
+  { id: '5', nombre: '5. BUIN SUR', data: uvBuinSur },
+  { id: '6', nombre: '6. NUEVO BUIN', data: uvNuevoBuin },
+  { id: '7', nombre: '7. MAIPO', data: uvMaipo },
+  { id: '8', nombre: '8. ALTO JAHUEL', data: uvAltoJahuel },
+  { id: '9', nombre: '9. LINDEROS', data: uvLinderos },
+  { id: '10', nombre: '10. VILUCO', data: uvViluco },
+  { id: '11', nombre: '11. VALDIVIA DE PAINE', data: uvValdiviaDePaine },
+  { id: '12', nombre: '12. CERVERA', data: uvCervera },
+  { id: '13', nombre: '13. LA ESTANCILLA', data: uvLaEstancilla },
+  { id: '14', nombre: '14. NUEVO LINDEROS', data: uvNuevoLinderos },
+  { id: '15', nombre: '15. FLOR DE MAIPO', data: uvFlorDeMaipo },
+  { id: '16', nombre: '16. LOS GUINDOS', data: uvLosGuindos },
+  { id: '17', nombre: '17. EL RECURSO', data: uvElRecurso },
+  { id: '18', nombre: '18. RURAL NORTE', data: uvRuralNorte },
+  { id: '19', nombre: '19. EL CERRILLO', data: uvElCerrillo },
 ];
 
 // Configuración de iconos personalizados para Leaflet en Next.js
