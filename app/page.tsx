@@ -14,10 +14,7 @@ import Kanban from '../components/Kanban';
 import Estadisticas from '../components/Estadisticas';
 import AdminPanel from '../components/AdminPanel';
 
-const MapaBuinZonas = dynamic(() => import('@/components/MapaBuinZonas'), {
-  ssr: false,
-  loading: () => <div style={{ padding: '40px', textAlign: 'center', fontWeight: 'bold' }}>Cargando mapa táctico de Buin...</div>
-});
+
 
 const MapComponent = dynamic(() => import('../components/Map'), { 
   ssr: false,
@@ -325,8 +322,15 @@ export default function Dashboard() {
                   <span style={{ color: '#0284c7', fontFamily: 'monospace', fontSize: '10px', backgroundColor: '#f0f9ff', padding: '4px 10px', borderRadius: '8px', border: '1px solid #bae6fd' }}>WGS 84</span>
                 </div>
                 <div style={{ flex: 1, position: 'relative' }}>
-                  {/* AQUÍ INTEGRAMOS EL NUEVO MAPA TÁCTICO POR SECTORES DE BUIN */}
-                  <MapaBuinZonas />
+                  <MapComponent 
+                    tickets={ticketsFiltrados} 
+                    fantasmas={ticketsCercanos} 
+                    coordenadaSeleccionada={coordenadaEnfoque} 
+                    onTicketSelect={(id) => {
+                      const t = ticketsFiltrados.find(x => x.id === id);
+                      if(t) abrirDetalle(t.id, t.latitud, t.longitud);
+                    }} 
+                  />
                 </div>
               </div>
 
