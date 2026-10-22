@@ -8,28 +8,27 @@ import 'leaflet/dist/leaflet.css';
 // Importa el archivo JSON general de la comuna de Buin
 import buinBoundary from '../data/buin-boundary.json';
 
-// Imports mapeados al archivo JSON que realmente contiene sus coordenadas correspondientes
-import uvBuinCentro from '../data/unidades-vecinales/unidad-vecinal-3.json'; // uv3 -> Buin Centro
-import uvBuinPoniente from '../data/unidades-vecinales/unidad-vecinal-1.json'; // uv1 -> Buin Poniente
-import uvBuinNorte from '../data/unidades-vecinales/unidad-vecinal-16.json'; // uv16 -> Buin Norte
-import uvBuinOriente from '../data/unidades-vecinales/unidad-vecinal-12.json'; // uv12 -> Buin Oriente
-import uvBuinSur from '../data/unidades-vecinales/unidad-vecinal-9.json'; // uv9 -> Buin Sur
-import uvNuevoBuin from '../data/unidades-vecinales/unidad-vecinal-19.json'; // uv19 -> Nuevo Buin
-import uvMaipo from '../data/unidades-vecinales/unidad-vecinal-5.json'; // uv5 -> Maipo
-import uvAltoJahuel from '../data/unidades-vecinales/unidad-vecinal-10.json'; // uv10 -> Alto Jahuel
-import uvLinderos from '../data/unidades-vecinales/unidad-vecinal-7.json'; // uv7 -> Linderos
-import uvViluco from '../data/unidades-vecinales/unidad-vecinal-17.json'; // uv17 -> Viluco
-import uvValdiviaDePaine from '../data/unidades-vecinales/unidad-vecinal-18.json'; // uv18 -> Valdivia de Paine
-import uvCervera from '../data/unidades-vecinales/unidad-vecinal-15.json'; // uv15 -> Cervera
-import uvLaEstancilla from '../data/unidades-vecinales/unidad-vecinal-14.json'; // uv14 -> La Estancilla
-import uvNuevoLinderos from '../data/unidades-vecinales/unidad-vecinal-2.json'; // uv2 -> Nuevo Linderos
-import uvFlorDeMaipo from '../data/unidades-vecinales/unidad-vecinal-13.json'; // uv13 -> Flor de Maipo
-import uvLosGuindos from '../data/unidades-vecinales/unidad-vecinal-8.json'; // uv8 -> Los Guindos
-import uvElRecurso from '../data/unidades-vecinales/unidad-vecinal-11.json'; // uv11 -> El Recurso
-import uvRuralNorte from '../data/unidades-vecinales/unidad-vecinal-6.json'; // uv6 -> Rural Norte
-import uvElCerrillo from '../data/unidades-vecinales/unidad-vecinal-4.json'; // uv4 -> El Cerrillo
+// Imports de unidades vecinales
+import uvBuinCentro from '../data/unidades-vecinales/unidad-vecinal-3.json';
+import uvBuinPoniente from '../data/unidades-vecinales/unidad-vecinal-1.json';
+import uvBuinNorte from '../data/unidades-vecinales/unidad-vecinal-16.json';
+import uvBuinOriente from '../data/unidades-vecinales/unidad-vecinal-12.json';
+import uvBuinSur from '../data/unidades-vecinales/unidad-vecinal-9.json';
+import uvNuevoBuin from '../data/unidades-vecinales/unidad-vecinal-19.json';
+import uvMaipo from '../data/unidades-vecinales/unidad-vecinal-5.json';
+import uvAltoJahuel from '../data/unidades-vecinales/unidad-vecinal-10.json';
+import uvLinderos from '../data/unidades-vecinales/unidad-vecinal-7.json';
+import uvViluco from '../data/unidades-vecinales/unidad-vecinal-17.json';
+import uvValdiviaDePaine from '../data/unidades-vecinales/unidad-vecinal-18.json';
+import uvCervera from '../data/unidades-vecinales/unidad-vecinal-15.json';
+import uvLaEstancilla from '../data/unidades-vecinales/unidad-vecinal-14.json';
+import uvNuevoLinderos from '../data/unidades-vecinales/unidad-vecinal-2.json';
+import uvFlorDeMaipo from '../data/unidades-vecinales/unidad-vecinal-13.json';
+import uvLosGuindos from '../data/unidades-vecinales/unidad-vecinal-8.json';
+import uvElRecurso from '../data/unidades-vecinales/unidad-vecinal-11.json';
+import uvRuralNorte from '../data/unidades-vecinales/unidad-vecinal-6.json';
+import uvElCerrillo from '../data/unidades-vecinales/unidad-vecinal-4.json';
 
-// Lista oficial de las 19 unidades vecinales ordenadas exactamente del 1 al 19
 const UNIDADES_VECINALES = [
   { id: 'TODAS', nombre: 'Ver toda la comuna', data: null },
   { id: '1', nombre: '1. BUIN CENTRO', data: uvBuinCentro },
@@ -53,7 +52,6 @@ const UNIDADES_VECINALES = [
   { id: '19', nombre: '19. EL CERRILLO', data: uvElCerrillo },
 ];
 
-// Configuración de iconos personalizados para Leaflet en Next.js
 const iconoCustom = L.icon({
   iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
   shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
@@ -63,7 +61,6 @@ const iconoCustom = L.icon({
   shadowSize: [41, 41]
 });
 
-// Componente auxiliar para recentrar el mapa dinámicamente
 function ControladorVista({ centro, zoom }: { centro: [number, number]; zoom: number }) {
   const map = useMap();
   useEffect(() => {
@@ -80,47 +77,49 @@ interface MapProps {
 }
 
 export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, onTicketSelect }: MapProps) {
+  // ESTADOS DEL MAPA
   const [uvSeleccionadaId, setUvSeleccionadaId] = useState<string>('TODAS');
+  
+  // ESTADOS DE LAS CAPAS (Nuevos)
+  const [mostrarCalles, setMostrarCalles] = useState<boolean>(true);
+  const [mostrarBordesUV, setMostrarBordesUV] = useState<boolean>(false);
+  const [mostrarNombresUV, setMostrarNombresUV] = useState<boolean>(false);
   
   const centroBuin: [number, number] = [-33.7312, -70.7415];
   const zoomBuin = 13;
 
   const uvActual = UNIDADES_VECINALES.find(uv => uv.id === uvSeleccionadaId);
 
-  // 1. Extraer las coordenadas del JSON de Buin para la máscara exterior
   const buinCoordsLatLon = (buinBoundary.geometry.coordinates[0] as [number, number][]).map(
     (coord) => [coord[1], coord[0]] as [number, number]
   );
-
-  // 2. Definir un rectángulo gigante que cubra todo el mundo/región exterior
-  const mundoBounds: [number, number][] = [
-    [-90, -180],
-    [-90, 180],
-    [90, 180],
-    [90, -180]
-  ];
-
+  const mundoBounds: [number, number][] = [ [-90, -180], [-90, 180], [90, 180], [90, -180] ];
   const mascaraInvertida = [mundoBounds, buinCoordsLatLon];
 
-  // Estilo para el borde general de Buin
-  const estiloBordeBuin = {
-    color: '#000000',
-    weight: 2,
-    fill: false
-  };
-
-  // Estilo para la unidad vecinal seleccionada (sombreando en celeste)
-  const estiloUVSeleccionada = {
-    color: '#0284c7',       // Borde azul oscuro/celeste fuerte
-    weight: 3,
-    fillColor: '#38bdf8',   // Relleno celeste
-    fillOpacity: 0.4        // Sombreado celeste con opacidad
-  };
+  // URL del mapa base: Cambia dinámicamente si el usuario apaga los nombres de las calles
+  const tileLayerUrl = mostrarCalles 
+    ? "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+    : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png";
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
       
-      {/* MENÚ DESPLEGABLE SUPERIOR FLOTANTE PARA SELECCIONAR LA UNIDAD VECINAL */}
+      {/* Estilos inyectados para los nombres flotantes de las UV */}
+      <style>{`
+        .uv-label-tooltip {
+          background-color: rgba(255, 255, 255, 0.85);
+          border: 1px solid #0f172a;
+          border-radius: 6px;
+          font-weight: 800;
+          font-size: 10px;
+          color: #0f172a;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+          text-align: center;
+          padding: 4px 6px;
+        }
+      `}</style>
+
+      {/* MENÚ DESPLEGABLE SUPERIOR FLOTANTE */}
       <div style={{ position: 'absolute', top: '16px', left: '50%', transform: 'translateX(-50%)', zIndex: 1000, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '8px 12px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', gap: '8px' }}>
         <label htmlFor="select-uv" style={{ fontSize: '12px', fontWeight: 800, color: '#1e293b' }}>
           Unidad Vecinal:
@@ -132,51 +131,80 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
           style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 600, backgroundColor: '#ffffff', color: '#0f172a', cursor: 'pointer', outline: 'none' }}
         >
           {UNIDADES_VECINALES.map((uv) => (
-            <option key={uv.id} value={uv.id}>
-              {uv.nombre}
-            </option>
+            <option key={uv.id} value={uv.id}>{uv.nombre}</option>
           ))}
         </select>
       </div>
 
+      {/* PANEL FLOTANTE DE CAPAS (Arriba a la derecha) */}
+      <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 1000, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '12px 16px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <span style={{ fontSize: '12px', fontWeight: 900, color: '#0f172a', marginBottom: '4px' }}>CAPAS DEL MAPA</span>
+        
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}>
+          <input type="checkbox" checked={mostrarCalles} onChange={(e) => setMostrarCalles(e.target.checked)} style={{ cursor: 'pointer' }} />
+          Nombres de calles
+        </label>
+        
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}>
+          <input type="checkbox" checked={mostrarBordesUV} onChange={(e) => setMostrarBordesUV(e.target.checked)} style={{ cursor: 'pointer' }} />
+          Límites vecinales (Rayados)
+        </label>
+        
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}>
+          <input type="checkbox" checked={mostrarNombresUV} onChange={(e) => setMostrarNombresUV(e.target.checked)} style={{ cursor: 'pointer' }} />
+          Nombres de unidades
+        </label>
+      </div>
+
       {/* CONTENEDOR LEAFLET */}
       <div style={{ flex: 1, width: '100%', height: '100%' }}>
-        <MapContainer
-          center={centroBuin}
-          zoom={zoomBuin}
-          style={{ width: '100%', height: '100%' }}
-          zoomControl={false}
-        >
+        <MapContainer center={centroBuin} zoom={zoomBuin} style={{ width: '100%', height: '100%' }} zoomControl={false}>
           <ControladorVista centro={centroBuin} zoom={zoomBuin} />
 
-          {/* Teselas oficiales de OpenStreetMap */}
+          {/* Mapa base dinámico (Con o sin etiquetas de calles) */}
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+            url={tileLayerUrl}
           />
 
-          {/* MÁSCARA OSCURA EXTERIOR (Todo lo que está fuera de Buin) */}
           <Polygon
             positions={mascaraInvertida as any}
-            pathOptions={{
-              color: 'transparent',
-              fillColor: '#000000',
-              fillOpacity: 0.1,
-            }}
+            pathOptions={{ color: 'transparent', fillColor: '#000000', fillOpacity: 0.1 }}
           />
 
-          {/* LÍMITE GENERAL DE BUIN */}
-          <GeoJSON 
-            data={buinBoundary as any} 
-            style={estiloBordeBuin} 
-          />
+          <GeoJSON data={buinBoundary as any} style={{ color: '#000000', weight: 2, fill: false }} />
+
+          {/* CAPA DINÁMICA: TODOS LOS LÍMITES / NOMBRES DE LAS UNIDADES VECINALES */}
+          {(mostrarBordesUV || mostrarNombresUV) && UNIDADES_VECINALES.filter(uv => uv.id !== 'TODAS' && uv.data).map((uv) => (
+            <GeoJSON 
+              key={`capa-${uv.id}-${mostrarBordesUV}-${mostrarNombresUV}`}
+              data={uv.data as any} 
+              style={{
+                color: mostrarBordesUV ? '#000000' : 'transparent', // Negro si está activo, invisible si no
+                weight: 2,
+                dashArray: '5, 5', // Borde con rayas
+                fill: false,
+                opacity: mostrarBordesUV ? 1 : 0
+              }}
+              onEachFeature={(feature, layer) => {
+                // Si la capa de nombres está activa, agregamos el texto anclado al centro
+                if (mostrarNombresUV) {
+                  layer.bindTooltip(uv.nombre, {
+                    permanent: true,
+                    direction: 'center',
+                    className: 'uv-label-tooltip'
+                  });
+                }
+              }}
+            />
+          ))}
 
           {/* UNIDAD VECINAL SELECCIONADA (Sombreado Celeste) */}
           {uvActual && uvActual.data && (
             <GeoJSON 
-              key={uvSeleccionadaId}
+              key={`uv-seleccionada-${uvSeleccionadaId}`}
               data={uvActual.data as any} 
-              style={estiloUVSeleccionada} 
+              style={{ color: '#0284c7', weight: 3, fillColor: '#38bdf8', fillOpacity: 0.4 }} 
             />
           )}
 
@@ -184,11 +212,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
           {tickets.map((t) => {
             if (!t.latitud || !t.longitud) return null;
             return (
-              <Marker 
-                key={t.id} 
-                position={[t.latitud, t.longitud]} 
-                icon={iconoCustom}
-              >
+              <Marker key={t.id} position={[t.latitud, t.longitud]} icon={iconoCustom}>
                 <Popup>
                   <div style={{ minWidth: '160px', fontFamily: 'sans-serif' }}>
                     <span style={{ fontSize: '10px', fontWeight: 900, color: '#0284c7' }}>{t.codigoTicket}</span>
@@ -207,7 +231,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         </MapContainer>
       </div>
 
-      {/* ETIQUETA INFERIOR DE ZONA ACTIVA */}
+      {/* ETIQUETA INFERIOR */}
       <div style={{ position: 'absolute', bottom: '16px', left: '16px', backgroundColor: 'rgba(15, 23, 42, 0.9)', color: 'white', padding: '8px 14px', borderRadius: '10px', zIndex: 1000, backdropFilter: 'blur(4px)', boxShadow: '0 4px 6px rgba(0,0,0,0.2)' }}>
         <span style={{ display: 'block', fontSize: '8px', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase' }}>Zona Operativa C4</span>
         <span style={{ fontSize: '12px', fontWeight: 900, color: '#38bdf8' }}>{uvActual ? uvActual.nombre : 'Comuna de Buin'}</span>
