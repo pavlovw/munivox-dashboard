@@ -328,7 +328,7 @@ export default function Kanban({ tickets, onTicketSelect, onEstadoChange }: Kanb
                       {/* Fila 4: Footer de Tarjeta con Departamento y Clic directo de Avance */}
                       <div style={{ 
                         display: 'flex', 
-                        justify: 'space-between', 
+                        justifyContent: 'space-between', 
                         alignItems: 'center', 
                         paddingTop: '8px', 
                         borderTop: '1px solid #f1f5f9' 
