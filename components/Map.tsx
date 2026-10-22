@@ -98,8 +98,8 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
 
   // URL del mapa base: Cambia dinámicamente si el usuario apaga los nombres de las calles
   const tileLayerUrl = mostrarCalles 
-    ? "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-    : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png";
+    ? "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" // Oficial con calles
+    : "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"; // Esri sin calles
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
@@ -161,9 +161,11 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         <MapContainer center={centroBuin} zoom={zoomBuin} style={{ width: '100%', height: '100%' }} zoomControl={false}>
           <ControladorVista centro={centroBuin} zoom={zoomBuin} />
 
-          {/* Mapa base dinámico (Con o sin etiquetas de calles) */}
+          {/* Mapa base dinámico */}
           <TileLayer
-            attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+            attribution={mostrarCalles 
+              ? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              : '&copy; <a href="https://www.esri.com/">Esri</a>'}
             url={tileLayerUrl}
           />
 
