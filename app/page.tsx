@@ -7,7 +7,7 @@ import { useSession, signOut } from 'next-auth/react';
 import { 
   FiMap, FiGrid, FiActivity, FiSearch, FiShield, 
   FiClock, FiPhone, FiAlertTriangle, FiArrowLeft, FiRadio, FiCpu,
-  FiSettings, FiLogOut, FiSend, FiMessageSquare, FiImage
+  FiSettings, FiLogOut, FiSend, FiMessageSquare, FiImage, FiCheckCircle
 } from 'react-icons/fi';
 
 import Kanban from '../components/Kanban';
@@ -57,7 +57,8 @@ export default function Dashboard() {
   const [ticketsCercanos, setTicketsCercanos] = useState<any[]>([]);
   const [coordenadaEnfoque, setCoordenadaEnfoque] = useState<[number, number] | null>(null);
 
-  const [departamentoDerivacion, setDepartamentoDerivacion] = useState("SEGURIDAD PÚBLICA");
+  // Estado de derivación con "SIN ASIGNAR" como valor inicial por defecto
+  const [departamentoDerivacion, setDepartamentoDerivacion] = useState("SIN ASIGNAR");
 
   const API_GATEWAY_URL = "https://nn4p1ybmu2.execute-api.us-east-2.amazonaws.com";
 
@@ -90,20 +91,26 @@ export default function Dashboard() {
     });
   }, [tickets, filtroTexto, filtroEstado, filtroPrioridad]);
 
+  // AL ABRIR UN TICKET PENDIENTE, PASA AUTOMÁTICAMENTE A EVALUACIÓN (EN_REVISION)
   const abrirDetalle = async (id: string, lat: number | null, lng: number | null) => {
     try {
       const res = await fetch(`${API_GATEWAY_URL}/tickets/${id}`);
       if (res.ok) {
-        const detalle = await res.json();
+        const detalle: Ticket = await res.json();
+        
+        // Regla C4: Si el caso estaba PENDIENTE, pasa inmediatamente a EN_REVISION al ser inspeccionado
+        if (detalle.estado === 'PENDIENTE') {
+          await cambiarEstado(detalle.id, 'EN_REVISION');
+          detalle.estado = 'EN_REVISION';
+        }
+
         setTicketSeleccionado(detalle);
         
-        if (detalle.departamento?.nombre) {
-          setDepartamentoDerivacion(detalle.departamento.nombre);
-        }
+        // Si el ticket ya posee departamento guardado se asigna, de lo contrario se inicia en "SIN ASIGNAR"
+        setDepartamentoDerivacion(detalle.departamento?.nombre || "SIN ASIGNAR");
         
         if (lat && lng) {
           setCoordenadaEnfoque([lat, lng]);
-          // Nota: Si configuraste la ruta de "cercanos" en la Lambda, funcionará. Si no, ignorará el error.
           try {
             const resCercanos = await fetch(`${API_GATEWAY_URL}/tickets/cercanos?lat=${lat}&lng=${lng}`);
             if (resCercanos.ok) setTicketsCercanos(await resCercanos.json());
@@ -132,18 +139,24 @@ export default function Dashboard() {
         body: JSON.stringify({ nuevoEstado })
       });
       if (res.ok) {
-        if (ticketSeleccionado && ticketSeleccionado.id === ticketId) cerrarDetalle();
-        fetchTickets(); // Refresca la bandeja con el nuevo estado
+        if (ticketSeleccionado && ticketSeleccionado.id === ticketId) {
+          setTicketSeleccionado(prev => prev ? { ...prev, estado: nuevoEstado } : null);
+        }
+        fetchTickets(); 
       }
-
     } catch (error) { console.error(error); }
   };
 
   const derivarTicket = async (ticketId: string) => {
+    if (departamentoDerivacion === "SIN ASIGNAR") {
+      alert("⚠️ Debe seleccionar un departamento municipal válido antes de enviar a despacho.");
+      return;
+    }
+
     try {
       const res = await fetch(`${API_GATEWAY_URL}/tickets/${ticketId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ nuevoEstado: 'DERIVADO', departamentoAsignado: departamentoDerivacion })
+        body: JSON.stringify({ nuevoEstado: 'DESPACHADO', departamentoAsignado: departamentoDerivacion })
       });
       if (res.ok) {
         fetchTickets();
@@ -158,16 +171,6 @@ export default function Dashboard() {
     return { backgroundColor: '#f1f5f9', color: '#475569', borderColor: '#e2e8f0' };
   };
 
-  const obtenerEstiloEstado = (estado: string) => {
-    switch (estado) {
-      case 'PENDIENTE': return { backgroundColor: '#fff1f2', color: '#e11d48', borderColor: '#fecdd3' };
-      case 'EN_REVISION': return { backgroundColor: '#f0f9ff', color: '#0284c7', borderColor: '#bae6fd' };
-      case 'DESPACHADO': return { backgroundColor: '#eef2ff', color: '#4f46e5', borderColor: '#c7d2fe' };
-      case 'RESUELTO': return { backgroundColor: '#ecfdf5', color: '#059669', borderColor: '#a7f3d0' };
-      default: return { backgroundColor: '#f1f5f9', color: '#475569', borderColor: '#e2e8f0' };
-    }
-  };
-
   const obtenerEstadoVisual = (t: Ticket) => {
     if (t.estado === 'PENDIENTE') {
        const tieneGPS = t.latitud !== null;
@@ -176,10 +179,16 @@ export default function Dashboard() {
        if (!tieneGPS || !tieneFoto) {
          return { label: 'INCOMPLETO (GPS/FOTO)', bg: '#fef3c7', text: '#d97706', border: '#fde68a' }; 
        }
-       return { label: 'LISTO PARA DESPACHO', bg: '#fee2e2', text: '#dc2626', border: '#fecaca' }; 
+       return { label: 'NUEVO • PENDIENTE EVALUACIÓN', bg: '#fee2e2', text: '#dc2626', border: '#fecaca' }; 
     }
-    if (t.estado === 'DERIVADO' || t.estado === 'EN_REVISION' || t.estado === 'DESPACHADO') {
-      return { label: 'EN TERRENO', bg: '#eff6ff', text: '#2563eb', border: '#bfdbfe' }; 
+    if (t.estado === 'EN_REVISION') {
+       if (!t.departamento || t.departamento.nombre === 'SIN ASIGNAR') {
+         return { label: 'EN EVALUACIÓN (SIN ASIGNAR)', bg: '#e0f2fe', text: '#0369a1', border: '#bae6fd' };
+       }
+       return { label: `EVALUADO • ${t.departamento.nombre}`, bg: '#f0f9ff', text: '#0284c7', border: '#bae6fd' };
+    }
+    if (t.estado === 'DERIVADO' || t.estado === 'DESPACHADO') {
+      return { label: 'EN TERRENO (DESPACHADO)', bg: '#eff6ff', text: '#2563eb', border: '#bfdbfe' }; 
     }
     if (t.estado === 'RESUELTO') {
       return { label: 'RESUELTO', bg: '#ecfdf5', text: '#059669', border: '#a7f3d0' }; 
@@ -354,8 +363,10 @@ export default function Dashboard() {
                             style={{ flex: 1, fontSize: '11px', fontWeight: 600, padding: '10px', backgroundColor: '#F4F7FE', border: '1px solid transparent', borderRadius: '14px', outline: 'none', color: '#475569', cursor: 'pointer' }}
                           >
                             <option value="TODOS">Estado: Todos</option>
-                            <option value="PENDIENTE">Pendientes (Despacho)</option>
-                            <option value="DERIVADO">En Terreno</option>
+                            <option value="PENDIENTE">Pendientes</option>
+                            <option value="EN_REVISION">En Evaluación</option>
+                            <option value="DESPACHADO">En Terreno / Despachados</option>
+                            <option value="RESUELTO">Resueltos</option>
                           </select>
                           <select 
                             value={filtroPrioridad}
@@ -440,6 +451,7 @@ export default function Dashboard() {
 
                     <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', backgroundColor: '#ffffff' }}>
                       
+                      {/* DICTAMEN DE INTELIGENCIA ARTIFICIAL */}
                       <div style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '16px', padding: '16px', boxShadow: '0 4px 6px -1px rgba(217,119,6,0.1)' }}>
                          <h4 style={{ fontSize: '10px', fontWeight: 900, color: '#d97706', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <FiCpu size={14} /> DICTAMEN DE INTELIGENCIA ARTIFICIAL
@@ -505,16 +517,30 @@ export default function Dashboard() {
                       </div>
                     </div>
 
-                    {/* PANEL DE DESPACHO INTERACTIVO */}
+                    {/* PANEL DE DESPACHO INTERACTIVO CON RECOMENDACIÓN DE LA IA */}
                     {ticketSeleccionado.estado !== 'RESUELTO' && (
                       <div style={{ padding: '20px', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
-                        <label style={{ fontSize: '10px', fontWeight: 900, color: '#475569', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px', display: 'block' }}>PANEL DE DESPACHO MUNICIPAL</label>
+                        <label style={{ fontSize: '10px', fontWeight: 900, color: '#475569', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px', display: 'block' }}>
+                          PANEL DE DESPACHO MUNICIPAL
+                        </label>
+
+                        {/* BANNER DE RECOMENDACIÓN IA */}
+                        <div style={{ backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', padding: '10px 14px', borderRadius: '12px', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: '10px', fontWeight: 800, color: '#1e40af', textTransform: 'uppercase' }}>
+                            🤖 RECOMENDACIÓN IA:
+                          </span>
+                          <span style={{ fontSize: '11px', fontWeight: 900, color: '#1d4ed8', backgroundColor: '#dbeafe', padding: '4px 10px', borderRadius: '8px' }}>
+                            {ticketSeleccionado.departamento?.nombre || ticketSeleccionado.categoria?.nombre || "SEGURIDAD PÚBLICA"}
+                          </span>
+                        </div>
+
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                           <select 
                             value={departamentoDerivacion}
                             onChange={(e) => setDepartamentoDerivacion(e.target.value)}
-                            style={{ width: '100%', padding: '14px', backgroundColor: 'white', color: '#1e293b', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, borderRadius: '12px', outline: 'none', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
+                            style={{ width: '100%', padding: '14px', backgroundColor: 'white', color: departamentoDerivacion === "SIN ASIGNAR" ? '#dc2626' : '#1e293b', border: departamentoDerivacion === "SIN ASIGNAR" ? '1px solid #fca5a5' : '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, borderRadius: '12px', outline: 'none', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
                           >
+                            <option value="SIN ASIGNAR">-- SIN ASIGNAR DEPARTAMENTO --</option>
                             <option value="SEGURIDAD PÚBLICA">Derivar a: SEGURIDAD PÚBLICA</option>
                             <option value="DIMAO">Derivar a: DIMAO (Aseo y Ornato)</option>
                             <option value="TRÁNSITO">Derivar a: DIRECCIÓN DE TRÁNSITO</option>
@@ -524,9 +550,13 @@ export default function Dashboard() {
                           
                           <button 
                             onClick={() => derivarTicket(ticketSeleccionado.id)}
-                            style={{ width: '100%', backgroundColor: '#2563eb', color: 'white', padding: '14px', borderRadius: '12px', border: 'none', fontWeight: 900, fontSize: '13px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(37,99,235,0.3)', transition: 'background-color 0.2s' }}
-                            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#1d4ed8'}
-                            onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#2563eb'}
+                            style={{ width: '100%', backgroundColor: departamentoDerivacion === "SIN ASIGNAR" ? '#94a3b8' : '#2563eb', color: 'white', padding: '14px', borderRadius: '12px', border: 'none', fontWeight: 900, fontSize: '13px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: departamentoDerivacion === "SIN ASIGNAR" ? 'not-allowed' : 'pointer', boxShadow: '0 4px 6px -1px rgba(37,99,235,0.3)', transition: 'background-color 0.2s' }}
+                            onMouseOver={(e) => {
+                              if (departamentoDerivacion !== "SIN ASIGNAR") e.currentTarget.style.backgroundColor = '#1d4ed8';
+                            }}
+                            onMouseOut={(e) => {
+                              if (departamentoDerivacion !== "SIN ASIGNAR") e.currentTarget.style.backgroundColor = '#2563eb';
+                            }}
                           >
                             <FiSend size={16} /> CONFIRMAR DESPACHO A TERRENO
                           </button>
@@ -544,8 +574,8 @@ export default function Dashboard() {
           {vistaActiva === 'KANBAN' && (
             <div style={{ flex: 1, backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '24px', padding: '24px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               <div style={{ marginBottom: '20px' }}>
-                <h2 style={{ fontSize: '16px', fontWeight: 900, color: '#1e293b', margin: '0 0 4px 0' }}>Flujo Operativo</h2>
-                <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>Haz clic en un ticket para ver su detalle en el visor territorial.</p>
+                <h2 style={{ fontSize: '16px', fontWeight: 900, color: '#1e293b', margin: '0 0 4px 0' }}>Flujo Operativo de Monitoreo</h2>
+                <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>Haz clic en un ticket para ver su detalle e inspeccionarlo en el visor territorial.</p>
               </div>
               <Kanban 
                 tickets={ticketsFiltrados} 
