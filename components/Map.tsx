@@ -86,7 +86,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
             pathOptions={{
               color: 'transparent', // Sin borde en el rectángulo exterior global
               fillColor: '#000000', // Color negro para la sombra
-              fillOpacity: 0.4,     // Opacidad del 40% pedida
+              fillOpacity: 0.2,     // Opacidad del 40% pedida
             }}
           />
 
