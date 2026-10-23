@@ -277,7 +277,7 @@ export default function Dashboard() {
             <span style={{ display: 'block', fontSize: '12px', color: 'white', fontWeight: 'bold', marginTop: '4px' }}>{session?.user?.name || 'Usuario'}</span>
           </div>
           <button 
-            onClick={() => signOut()} 
+            onClick={() => signOut({ callbackUrl: '/' })} 
             style={{ background: 'transparent', border: 'none', color: '#fca5a5', cursor: 'pointer', padding: '4px' }} 
             title="Cerrar Sesión"
           >
