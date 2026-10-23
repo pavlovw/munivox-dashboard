@@ -64,7 +64,6 @@ export default function Dashboard() {
 
   const API_GATEWAY_URL = process.env.NEXT_PUBLIC_API_GATEWAY_URL || "https://nn4p1ybmu2.execute-api.us-east-2.amazonaws.com";
 
-  // ENRUTAMIENTO INTELIGENTE Y REGISTRO EN POSTGRESQL
   useEffect(() => {
     if (status === 'unauthenticated') {
       router.push('/login');
@@ -76,7 +75,6 @@ export default function Dashboard() {
       
       const inicializarSesion = async () => {
         try {
-          // Guardar al usuario en la BD de PostgreSQL usando tu Lambda
           await fetch(`${API_GATEWAY_URL}/operadores/sincronizar`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -87,7 +85,13 @@ export default function Dashboard() {
             })
           });
 
-          // Si el correo NO empieza con "operador", lo enviamos a su departamento
+          // SI ES FUNCIONARIO DE TERRENO, ENVIarlo A SU VISTA MÓVIL
+          if (email.includes('terreno')) {
+            router.push('/terreno');
+            return;
+          }
+
+          // SI NO ES EL OPERADOR CENTRAL, ENVIARLO A DEPARTAMENTOS
           if (!email.startsWith('operador')) {
             router.push('/departamentos');
             return;
