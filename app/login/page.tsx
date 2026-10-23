@@ -27,7 +27,7 @@ export default function Login() {
       setError('Credenciales inválidas. Acceso denegado por seguridad.');
       setCargando(false);
     } else {
-      router.push('/'); // Redirige al Dashboard si es exitoso
+      router.push('/'); // Redirige al Dashboard general para que el sistema decida a dónde enviarlo
     }
   };
 

@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect, useState, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { io } from 'socket.io-client';
 import { useSession, signOut } from 'next-auth/react';
 import { 
@@ -41,10 +42,12 @@ interface Ticket {
 }
 
 export default function Dashboard() {
-  const { data: session } = useSession(); 
+  const { data: session, status } = useSession(); 
+  const router = useRouter();
   
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [cargando, setCargando] = useState(true);
+  const [sincronizandoUsuario, setSincronizandoUsuario] = useState(true);
   
   type Vista = 'MAPA' | 'KANBAN' | 'ESTADISTICA' | 'ADMINISTRACION';
   const [vistaActiva, setVistaActiva] = useState<Vista>('MAPA');
@@ -59,7 +62,47 @@ export default function Dashboard() {
 
   const [departamentoDerivacion, setDepartamentoDerivacion] = useState("SIN ASIGNAR");
 
-  const API_GATEWAY_URL = "https://nn4p1ybmu2.execute-api.us-east-2.amazonaws.com";
+  const API_GATEWAY_URL = process.env.NEXT_PUBLIC_API_GATEWAY_URL || "https://nn4p1ybmu2.execute-api.us-east-2.amazonaws.com";
+
+  // ENRUTAMIENTO INTELIGENTE Y REGISTRO EN POSTGRESQL
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      router.push('/login');
+      return;
+    }
+
+    if (session?.user?.email) {
+      const email = session.user.email.toLowerCase();
+      
+      const inicializarSesion = async () => {
+        try {
+          // Guardar al usuario en la BD de PostgreSQL usando tu Lambda
+          await fetch(`${API_GATEWAY_URL}/operadores/sincronizar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: session?.user?.email,
+              sub: (session?.user as any)?.sub || undefined,
+              nombre: session?.user?.name || undefined
+            })
+          });
+
+          // Si el correo NO empieza con "operador", lo enviamos a su departamento
+          if (!email.startsWith('operador')) {
+            router.push('/departamentos');
+            return;
+          }
+          
+          setSincronizandoUsuario(false);
+        } catch (error) {
+          console.error("Error al sincronizar operador con la BD:", error);
+          setSincronizandoUsuario(false);
+        }
+      };
+
+      inicializarSesion();
+    }
+  }, [session, status, router]);
 
   const fetchTickets = async () => {
     try {
@@ -72,35 +115,14 @@ export default function Dashboard() {
     }
   };
 
-  // SINCRONIZACIÓN AUTOMÁTICA DEL OPERADOR EN BD POSTGRESQL AL INGRESAR
   useEffect(() => {
-    if (session?.user?.email) {
-      const sincronizarOperador = async () => {
-        try {
-          await fetch(`${API_GATEWAY_URL}/operadores/sincronizar`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: session?.user?.email,
-              sub: (session?.user as any)?.sub || undefined,
-              nombre: session?.user?.name || undefined
-            })
-          });
-        } catch (error) {
-          console.error("Error al sincronizar operador con la BD:", error);
-        }
-      };
-
-      sincronizarOperador();
+    if (!sincronizandoUsuario) {
+      fetchTickets();
+      const socket = io("https://socket-service.politeplant-263a4d5b.eastus.azurecontainerapps.io", { transports: ['websocket', 'polling'] });
+      socket.on('actualizar_dashboard', () => fetchTickets());
+      return () => { socket.disconnect(); };
     }
-  }, [session]);
-
-  useEffect(() => {
-    fetchTickets();
-    const socket = io("https://socket-service.politeplant-263a4d5b.eastus.azurecontainerapps.io", { transports: ['websocket', 'polling'] });
-    socket.on('actualizar_dashboard', () => fetchTickets());
-    return () => { socket.disconnect(); };
-  }, []);
+  }, [sincronizandoUsuario]);
 
   const ticketsFiltrados = useMemo(() => {
     return tickets.filter(t => {
@@ -132,7 +154,7 @@ export default function Dashboard() {
             const resCercanos = await fetch(`${API_GATEWAY_URL}/tickets/cercanos?lat=${lat}&lng=${lng}`);
             if (resCercanos.ok) setTicketsCercanos(await resCercanos.json());
           } catch (e) {
-            console.warn("Ruta de tickets cercanos no disponible en el API Gateway", e);
+            console.warn("Ruta de tickets cercanos no disponible", e);
           }
         } else {
           setCoordenadaEnfoque(null);
@@ -192,24 +214,15 @@ export default function Dashboard() {
     if (t.estado === 'PENDIENTE') {
        const tieneGPS = t.latitud !== null;
        const tieneFoto = t.evidencias && t.evidencias.length > 0;
-       
-       if (!tieneGPS || !tieneFoto) {
-         return { label: 'INCOMPLETO (GPS/FOTO)', bg: '#fef3c7', text: '#d97706', border: '#fde68a' }; 
-       }
+       if (!tieneGPS || !tieneFoto) return { label: 'INCOMPLETO (GPS/FOTO)', bg: '#fef3c7', text: '#d97706', border: '#fde68a' }; 
        return { label: 'NUEVO • PENDIENTE EVALUACIÓN', bg: '#fee2e2', text: '#dc2626', border: '#fecaca' }; 
     }
     if (t.estado === 'EN_REVISION') {
-       if (!t.departamento || t.departamento.nombre === 'SIN ASIGNAR') {
-         return { label: 'EN EVALUACIÓN (SIN ASIGNAR)', bg: '#e0f2fe', text: '#0369a1', border: '#bae6fd' };
-       }
+       if (!t.departamento || t.departamento.nombre === 'SIN ASIGNAR') return { label: 'EN EVALUACIÓN (SIN ASIGNAR)', bg: '#e0f2fe', text: '#0369a1', border: '#bae6fd' };
        return { label: `EVALUADO • ${t.departamento.nombre}`, bg: '#f0f9ff', text: '#0284c7', border: '#bae6fd' };
     }
-    if (t.estado === 'DERIVADO' || t.estado === 'DESPACHADO') {
-      return { label: 'EN TERRENO (DESPACHADO)', bg: '#eff6ff', text: '#2563eb', border: '#bfdbfe' }; 
-    }
-    if (t.estado === 'RESUELTO') {
-      return { label: 'RESUELTO', bg: '#ecfdf5', text: '#059669', border: '#a7f3d0' }; 
-    }
+    if (t.estado === 'DERIVADO' || t.estado === 'DESPACHADO') return { label: 'EN TERRENO (DESPACHADO)', bg: '#eff6ff', text: '#2563eb', border: '#bfdbfe' }; 
+    if (t.estado === 'RESUELTO') return { label: 'RESUELTO', bg: '#ecfdf5', text: '#059669', border: '#a7f3d0' }; 
     return { label: t.estado, bg: '#f1f5f9', text: '#475569', border: '#e2e8f0' };
   };
 
@@ -244,6 +257,15 @@ export default function Dashboard() {
       </div>
     ));
   };
+
+  if (status === 'loading' || sincronizandoUsuario) {
+    return (
+      <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', backgroundColor: '#F4F7FE', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ width: '40px', height: '40px', border: '4px solid #2563EB', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+        <p style={{ fontWeight: 'bold', color: '#1e293b', fontSize: '14px', letterSpacing: '1px' }}>VERIFICANDO ACCESOS...</p>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', height: '100vh', backgroundColor: '#F4F7FE', fontFamily: 'system-ui, sans-serif', color: '#334155', overflow: 'hidden' }}>
@@ -292,7 +314,7 @@ export default function Dashboard() {
             <span style={{ display: 'block', fontSize: '12px', color: 'white', fontWeight: 'bold', marginTop: '4px' }}>{session?.user?.name || 'Usuario'}</span>
           </div>
           <button 
-            onClick={() => signOut({ callbackUrl: '/' })} 
+            onClick={() => signOut({ callbackUrl: '/login' })} 
             style={{ background: 'transparent', border: 'none', color: '#fca5a5', cursor: 'pointer', padding: '4px' }} 
             title="Cerrar Sesión"
           >
@@ -396,7 +418,7 @@ export default function Dashboard() {
                       {cargando ? (
                         <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', gap: '8px' }}>
                           <div style={{ width: '20px', height: '20px', border: '2px solid #0284c7', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-                          <p style={{ fontSize: '11px', fontWeight: 'bold', color: '#94a3b8' }}>SINCRONIZANDO...</p>
+                          <p style={{ fontSize: '11px', fontWeight: 'bold', color: '#94a3b8' }}>CARGANDO...</p>
                         </div>
                       ) : ticketsFiltrados.length === 0 ? (
                         <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', border: '2px dashed #e2e8f0', borderRadius: '16px', padding: '24px', textAlign: 'center' }}>
