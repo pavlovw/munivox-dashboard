@@ -85,8 +85,8 @@ export default function Dashboard() {
             })
           });
 
-          // SI ES FUNCIONARIO DE TERRENO, ENVIarlo A SU VISTA MÓVIL
-          if (email.includes('terreno')) {
+          // SI ES FUNCIONARIO DE TERRENO (contiene 'terreno' o tiene un punto como juan.aseo)
+          if (email.includes('terreno') || (email.includes('.') && !email.startsWith('operador'))) {
             router.push('/terreno');
             return;
           }
