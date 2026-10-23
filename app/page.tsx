@@ -81,9 +81,9 @@ export default function Dashboard() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              email: session.user.email,
-              sub: (session.user as any).sub || undefined,
-              nombre: session.user.name || undefined
+              email: session?.user?.email,
+              sub: (session?.user as any)?.sub || undefined,
+              nombre: session?.user?.name || undefined
             })
           });
         } catch (error) {
