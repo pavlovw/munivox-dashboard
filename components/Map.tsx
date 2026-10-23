@@ -80,10 +80,8 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
   // ESTADOS DEL MAPA
   const [uvSeleccionadaId, setUvSeleccionadaId] = useState<string>('TODAS');
   
-  // ESTADOS DE LAS CAPAS (Nuevos)
-  const [mostrarCalles, setMostrarCalles] = useState<boolean>(true);
+  // ESTADO DE LA CAPA (Solo límites rayados)
   const [mostrarBordesUV, setMostrarBordesUV] = useState<boolean>(false);
-  const [mostrarNombresUV, setMostrarNombresUV] = useState<boolean>(false);
   
   const centroBuin: [number, number] = [-33.7312, -70.7415];
   const zoomBuin = 13;
@@ -96,28 +94,8 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
   const mundoBounds: [number, number][] = [ [-90, -180], [-90, 180], [90, 180], [90, -180] ];
   const mascaraInvertida = [mundoBounds, buinCoordsLatLon];
 
-  // URL del mapa base: Cambia dinámicamente si el usuario apaga los nombres de las calles
-  const tileLayerUrl = mostrarCalles 
-    ? "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" // Oficial con calles
-    : "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"; // Esri sin calles
-
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-      
-      {/* Estilos inyectados para los nombres flotantes de las UV */}
-      <style>{`
-        .uv-label-tooltip {
-          background-color: rgba(255, 255, 255, 0.85);
-          border: 1px solid #0f172a;
-          border-radius: 6px;
-          font-weight: 800;
-          font-size: 10px;
-          color: #0f172a;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-          text-align: center;
-          padding: 4px 6px;
-        }
-      `}</style>
 
       {/* MENÚ DESPLEGABLE SUPERIOR FLOTANTE */}
       <div style={{ position: 'absolute', top: '16px', left: '50%', transform: 'translateX(-50%)', zIndex: 1000, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '8px 12px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -136,23 +114,13 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         </select>
       </div>
 
-      {/* PANEL FLOTANTE DE CAPAS (Arriba a la derecha) */}
+      {/* PANEL FLOTANTE DE CAPAS (Solo Límites Vecinales) */}
       <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 1000, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '12px 16px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <span style={{ fontSize: '12px', fontWeight: 900, color: '#0f172a', marginBottom: '4px' }}>CAPAS DEL MAPA</span>
         
         <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}>
-          <input type="checkbox" checked={mostrarCalles} onChange={(e) => setMostrarCalles(e.target.checked)} style={{ cursor: 'pointer' }} />
-          Nombres de calles
-        </label>
-        
-        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}>
           <input type="checkbox" checked={mostrarBordesUV} onChange={(e) => setMostrarBordesUV(e.target.checked)} style={{ cursor: 'pointer' }} />
           Límites vecinales (Rayados)
-        </label>
-        
-        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}>
-          <input type="checkbox" checked={mostrarNombresUV} onChange={(e) => setMostrarNombresUV(e.target.checked)} style={{ cursor: 'pointer' }} />
-          Nombres de unidades
         </label>
       </div>
 
@@ -161,12 +129,10 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         <MapContainer center={centroBuin} zoom={zoomBuin} style={{ width: '100%', height: '100%' }} zoomControl={false}>
           <ControladorVista centro={centroBuin} zoom={zoomBuin} />
 
-          {/* Mapa base dinámico */}
+          {/* Mapa base de OpenStreetMap 100% gratuito */}
           <TileLayer
-            attribution={mostrarCalles 
-              ? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              : '&copy; <a href="https://www.esri.com/">Esri</a>'}
-            url={tileLayerUrl}
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
           <Polygon
@@ -176,27 +142,16 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
 
           <GeoJSON data={buinBoundary as any} style={{ color: '#000000', weight: 2, fill: false }} />
 
-          {/* CAPA DINÁMICA: TODOS LOS LÍMITES / NOMBRES DE LAS UNIDADES VECINALES */}
-          {(mostrarBordesUV || mostrarNombresUV) && UNIDADES_VECINALES.filter(uv => uv.id !== 'TODAS' && uv.data).map((uv) => (
+          {/* CAPA DINÁMICA: TODOS LOS LÍMITES DE LAS UNIDADES VECINALES */}
+          {mostrarBordesUV && UNIDADES_VECINALES.filter(uv => uv.id !== 'TODAS' && uv.data).map((uv) => (
             <GeoJSON 
-              key={`capa-${uv.id}-${mostrarBordesUV}-${mostrarNombresUV}`}
+              key={`capa-bordes-${uv.id}`}
               data={uv.data as any} 
               style={{
-                color: mostrarBordesUV ? '#000000' : 'transparent', // Negro si está activo, invisible si no
-                weight: 2,
-                dashArray: '5, 5', // Borde con rayas
-                fill: false,
-                opacity: mostrarBordesUV ? 1 : 0
-              }}
-              onEachFeature={(feature, layer) => {
-                // Si la capa de nombres está activa, agregamos el texto anclado al centro
-                if (mostrarNombresUV) {
-                  layer.bindTooltip(uv.nombre, {
-                    permanent: true,
-                    direction: 'center',
-                    className: 'uv-label-tooltip'
-                  });
-                }
+                color: '#000000',
+                weight: 1, // Más delgado (antes era 2)
+                dashArray: '4, 4', // Rayas proporcionales al nuevo grosor
+                fill: false
               }}
             />
           ))}
@@ -206,7 +161,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
             <GeoJSON 
               key={`uv-seleccionada-${uvSeleccionadaId}`}
               data={uvActual.data as any} 
-              style={{ color: '#0284c7', weight: 3, fillColor: '#38bdf8', fillOpacity: 0.4 }} 
+              style={{ color: '#0284c7', weight: 3, fillColor: '#38bdf8', fillOpacity: 0.1 }} 
             />
           )}
 
