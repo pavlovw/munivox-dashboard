@@ -342,13 +342,11 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         /* ==================================================== */
         /* CATEGORÍA 1: AUTO ABANDONADO */
         .marcador-img.auto-abandonado { background-image: url('/marcadores/auto-estatico.png'); }
-        .marcador-img.auto-abandonado:hover, 
-        .marcador-img.auto-abandonado.activo { background-image: url('/marcadores/ezgif-maker.gif'); }
+        .marcador-img.auto-abandonado:hover, .marcador-img.auto-abandonado.activo { background-image: url('/marcadores/ezgif-maker.gif'); }
 
         /* CATEGORÍA 2: BASURA / ESCOMBROS */
         .marcador-img.basura { background-image: url('/marcadores/basura-estatica.png'); }
-        .marcador-img.basura:hover, 
-        .marcador-img.basura.activo { background-image: url('/marcadores/basura.gif'); }
+        .marcador-img.basura:hover, .marcador-img.basura.activo { background-image: url('/marcadores/basura.gif'); }
 
         /* ==================================================== */
         /* RESERVAS PARA FUTURAS CATEGORÍAS (Descomenta y sube las imágenes a la carpeta /marcadores/ cuando las tengas) */
