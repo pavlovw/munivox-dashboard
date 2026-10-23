@@ -29,7 +29,7 @@ import uvRuralNorte from '../data/unidades-vecinales/unidad-vecinal-6.json';
 import uvElCerrillo from '../data/unidades-vecinales/unidad-vecinal-4.json';
 
 // REEMPLAZA ESTE TOKEN CON TU TOKEN PÚBLICO DE MAPBOX
-const MAPBOX_TOKEN = 'pk.eyJ1IjoicGF2bG92dyIsImEiOiJjbXZrOGl5N3owMWNuMndvamdwMXJzMWh6In0.l-AOIYXLbed9G-BNp9hFNg';
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN
 
 const UNIDADES_VECINALES = [
   { id: 'TODAS', nombre: 'Ver toda la comuna', data: null },
