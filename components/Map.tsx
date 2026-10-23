@@ -1,9 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, GeoJSON, Polygon, Marker, Popup, useMap } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import React, { useRef, useEffect, useState } from 'react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 
 // Importa el archivo JSON general de la comuna de Buin
 import buinBoundary from '../data/buin-boundary.json';
@@ -29,6 +28,9 @@ import uvElRecurso from '../data/unidades-vecinales/unidad-vecinal-11.json';
 import uvRuralNorte from '../data/unidades-vecinales/unidad-vecinal-6.json';
 import uvElCerrillo from '../data/unidades-vecinales/unidad-vecinal-4.json';
 
+// REEMPLAZA ESTE TOKEN CON TU TOKEN PÚBLICO DE MAPBOX
+const MAPBOX_TOKEN = 'pk.eyJ1IjoicGF2bG92dyIsImEiOiJjbXhxOTllZ2EwMGdyMmtvNHZ0ejRhZHFqIn0.example_replace_this_token';
+
 const UNIDADES_VECINALES = [
   { id: 'TODAS', nombre: 'Ver toda la comuna', data: null },
   { id: '1', nombre: '1. BUIN CENTRO', data: uvBuinCentro },
@@ -52,23 +54,6 @@ const UNIDADES_VECINALES = [
   { id: '19', nombre: '19. EL CERRILLO', data: uvElCerrillo },
 ];
 
-const iconoCustom = L.icon({
-  iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41]
-});
-
-function ControladorVista({ centro, zoom }: { centro: [number, number]; zoom: number }) {
-  const map = useMap();
-  useEffect(() => {
-    map.setView(centro, zoom, { animate: true });
-  }, [centro, zoom, map]);
-  return null;
-}
-
 interface MapProps {
   tickets: any[];
   fantasmas?: any[];
@@ -77,28 +62,216 @@ interface MapProps {
 }
 
 export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, onTicketSelect }: MapProps) {
-  // ESTADOS DEL MAPA
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+
   const [uvSeleccionadaId, setUvSeleccionadaId] = useState<string>('TODAS');
-  
-  // ESTADO DE LA CAPA (Solo límites rayados)
   const [mostrarBordesUV, setMostrarBordesUV] = useState<boolean>(false);
-  
-  const centroBuin: [number, number] = [-33.7312, -70.7415];
-  const zoomBuin = 13;
+  const [esModo3D, setEsModo3D] = useState<boolean>(false);
 
   const uvActual = UNIDADES_VECINALES.find(uv => uv.id === uvSeleccionadaId);
 
-  const buinCoordsLatLon = (buinBoundary.geometry.coordinates[0] as [number, number][]).map(
-    (coord) => [coord[1], coord[0]] as [number, number]
-  );
-  const mundoBounds: [number, number][] = [ [-90, -180], [-90, 180], [90, 180], [90, -180] ];
-  const mascaraInvertida = [mundoBounds, buinCoordsLatLon];
+  // Inicialización de Mapbox GL
+  useEffect(() => {
+    if (!mapContainerRef.current) return;
+
+    mapboxgl.accessToken = MAPBOX_TOKEN;
+
+    const map = new mapboxgl.Map({
+      container: mapContainerRef.current,
+      style: 'mapbox://styles/mapbox/light-v11', // Estilo claro monocromático
+      center: [-70.7415, -33.7312], // [Lon, Lat]
+      zoom: 13,
+      pitch: 0,
+      bearing: 0,
+    });
+
+    mapRef.current = map;
+
+    map.on('load', () => {
+      // 1. CAPA DE EDIFICIOS 3D (CELESTES SÓLIDOS)
+      const layers = map.getStyle().layers;
+      const labelLayerId = layers?.find(
+        (layer) => layer.type === 'symbol' && layer.layout?.['text-field']
+      )?.id;
+
+      map.addLayer(
+        {
+          id: 'edificios-3d',
+          source: 'composite',
+          'source-layer': 'building',
+          filter: ['==', 'extrude', 'true'],
+          type: 'fill-extrusion',
+          minzoom: 14,
+          paint: {
+            'fill-extrusion-color': '#38bdf8', // Celeste sólido
+            'fill-extrusion-height': ['get', 'height'],
+            'fill-extrusion-base': ['get', 'min_height'],
+            'fill-extrusion-opacity': 0.7,
+          },
+        },
+        labelLayerId
+      );
+
+      // 2. FUENTE Y CAPA LÍMITE COMUNAL BUIN
+      map.addSource('buin-boundary-src', {
+        type: 'geojson',
+        data: buinBoundary as any,
+      });
+
+      map.addLayer({
+        id: 'buin-boundary-line',
+        type: 'line',
+        source: 'buin-boundary-src',
+        paint: {
+          'line-color': '#000000',
+          'line-width': 2,
+        },
+      });
+
+      // 3. FUENTE Y CAPA UNIDAD VECINAL SELECCIONADA
+      map.addSource('uv-seleccionada-src', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+
+      map.addLayer({
+        id: 'uv-seleccionada-fill',
+        type: 'fill',
+        source: 'uv-seleccionada-src',
+        paint: {
+          'fill-color': '#38bdf8',
+          'fill-opacity': 0.25,
+        },
+      });
+
+      map.addLayer({
+        id: 'uv-seleccionada-line',
+        type: 'line',
+        source: 'uv-seleccionada-src',
+        paint: {
+          'line-color': '#0284c7',
+          'line-width': 2,
+        },
+      });
+
+      // 4. FUENTES Y CAPAS RAYADAS PARA TODAS LAS UNIDADES VECINALES
+      UNIDADES_VECINALES.forEach((uv) => {
+        if (uv.id !== 'TODAS' && uv.data) {
+          map.addSource(`uv-borde-${uv.id}-src`, {
+            type: 'geojson',
+            data: uv.data as any,
+          });
+
+          map.addLayer({
+            id: `uv-borde-${uv.id}-line`,
+            type: 'line',
+            source: `uv-borde-${uv.id}-src`,
+            layout: {
+              visibility: 'none',
+            },
+            paint: {
+              'line-color': '#000000',
+              'line-width': 1,
+              'line-dasharray': [4, 4],
+            },
+          });
+        }
+      });
+    });
+
+    return () => map.remove();
+  }, []);
+
+  // Actualizar UV Seleccionada en el Mapa
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
+    const source = map.getSource('uv-seleccionada-src') as mapboxgl.GeoJSONSource;
+    if (source) {
+      if (uvActual && uvActual.data) {
+        source.setData(uvActual.data as any);
+      } else {
+        source.setData({ type: 'FeatureCollection', features: [] });
+      }
+    }
+  }, [uvSeleccionadaId, uvActual]);
+
+  // Mostrar / Ocultar capas rayadas de Unidades Vecinales
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
+    UNIDADES_VECINALES.forEach((uv) => {
+      if (uv.id !== 'TODAS' && uv.data) {
+        const layerId = `uv-borde-${uv.id}-line`;
+        if (map.getLayer(layerId)) {
+          map.setLayoutProperty(layerId, 'visibility', mostrarBordesUV ? 'visible' : 'none');
+        }
+      }
+    });
+  }, [mostrarBordesUV]);
+
+  // Marcadores de Tickets
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const markers: mapboxgl.Marker[] = [];
+
+    tickets.forEach((t) => {
+      if (!t.latitud || !t.longitud) return;
+
+      const popupNode = document.createElement('div');
+      popupNode.style.fontFamily = 'sans-serif';
+      popupNode.style.minWidth = '140px';
+      popupNode.innerHTML = `
+        <span style="font-size: 10px; font-weight: 900; color: #0284c7;">${t.codigoTicket}</span>
+        <p style="font-size: 12px; font-weight: bold; margin: 4px 0;">${t.categoria?.nombre || 'Incidencia'}</p>
+        <button id="btn-ticket-${t.id}" style="width: 100%; background-color: #2563eb; color: white; border: none; padding: 6px; border-radius: 6px; font-weight: bold; font-size: 11px; cursor: pointer;">
+          Ver Expediente
+        </button>
+      `;
+
+      popupNode.querySelector(`#btn-ticket-${t.id}`)?.addEventListener('click', () => {
+        onTicketSelect(t.id);
+      });
+
+      const popup = new mapboxgl.Popup({ offset: 25 }).setDOMContent(popupNode);
+
+      const marker = new mapboxgl.Marker({ color: '#2563eb' })
+        .setLngLat([t.longitud, t.latitud])
+        .setPopup(popup)
+        .addTo(map);
+
+      markers.push(marker);
+    });
+
+    return () => {
+      markers.forEach((m) => m.remove());
+    };
+  }, [tickets, onTicketSelect]);
+
+  // Alternar Vista 2D / 3D
+  const alternarVista = () => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (esModo3D) {
+      map.easeTo({ pitch: 0, bearing: 0, duration: 1000 });
+      setEsModo3D(false);
+    } else {
+      map.easeTo({ pitch: 60, bearing: -15, duration: 1000 });
+      setEsModo3D(true);
+    }
+  };
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
 
       {/* MENÚ DESPLEGABLE SUPERIOR FLOTANTE */}
-      <div style={{ position: 'absolute', top: '16px', left: '50%', transform: 'translateX(-50%)', zIndex: 1000, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '8px 12px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div style={{ position: 'absolute', top: '16px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '8px 12px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', gap: '8px' }}>
         <label htmlFor="select-uv" style={{ fontSize: '12px', fontWeight: 800, color: '#1e293b' }}>
           Unidad Vecinal:
         </label>
@@ -114,82 +287,28 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         </select>
       </div>
 
-      {/* PANEL FLOTANTE DE CAPAS (Solo Límites Vecinales) */}
-      <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 1000, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '12px 16px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <span style={{ fontSize: '12px', fontWeight: 900, color: '#0f172a', marginBottom: '4px' }}>CAPAS DEL MAPA</span>
+      {/* PANEL FLOTANTE DE CAPAS Y MODO 2D/3D */}
+      <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 10, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '12px 16px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <span style={{ fontSize: '12px', fontWeight: 900, color: '#0f172a' }}>CAPAS DEL MAPA</span>
         
         <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}>
           <input type="checkbox" checked={mostrarBordesUV} onChange={(e) => setMostrarBordesUV(e.target.checked)} style={{ cursor: 'pointer' }} />
           Límites vecinales (Rayados)
         </label>
+
+        <button
+          onClick={alternarVista}
+          style={{ width: '100%', backgroundColor: '#0f172a', color: '#ffffff', border: 'none', padding: '6px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginTop: '2px' }}
+        >
+          {esModo3D ? 'Cambiar a Vista 2D' : 'Cambiar a Vista 3D'}
+        </button>
       </div>
 
-      {/* CONTENEDOR LEAFLET */}
-      <div style={{ flex: 1, width: '100%', height: '100%' }}>
-        <MapContainer center={centroBuin} zoom={zoomBuin} style={{ width: '100%', height: '100%' }} zoomControl={false}>
-          <ControladorVista centro={centroBuin} zoom={zoomBuin} />
-
-          {/* Mapa base de OpenStreetMap 100% gratuito */}
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-
-          <Polygon
-            positions={mascaraInvertida as any}
-            pathOptions={{ color: 'transparent', fillColor: '#000000', fillOpacity: 0.1 }}
-          />
-
-          <GeoJSON data={buinBoundary as any} style={{ color: '#000000', weight: 2, fill: false }} />
-
-          {/* CAPA DINÁMICA: TODOS LOS LÍMITES DE LAS UNIDADES VECINALES */}
-          {mostrarBordesUV && UNIDADES_VECINALES.filter(uv => uv.id !== 'TODAS' && uv.data).map((uv) => (
-            <GeoJSON 
-              key={`capa-bordes-${uv.id}`}
-              data={uv.data as any} 
-              style={{
-                color: '#000000',
-                weight: 1, // Más delgado (antes era 2)
-                dashArray: '4, 4', // Rayas proporcionales al nuevo grosor
-                fill: false
-              }}
-            />
-          ))}
-
-          {/* UNIDAD VECINAL SELECCIONADA (Sombreado Celeste) */}
-          {uvActual && uvActual.data && (
-            <GeoJSON 
-              key={`uv-seleccionada-${uvSeleccionadaId}`}
-              data={uvActual.data as any} 
-              style={{ color: '#0284c7', weight: 3, fillColor: '#38bdf8', fillOpacity: 0.1 }} 
-            />
-          )}
-
-          {/* MARCADORES DE TICKETS REALES */}
-          {tickets.map((t) => {
-            if (!t.latitud || !t.longitud) return null;
-            return (
-              <Marker key={t.id} position={[t.latitud, t.longitud]} icon={iconoCustom}>
-                <Popup>
-                  <div style={{ minWidth: '160px', fontFamily: 'sans-serif' }}>
-                    <span style={{ fontSize: '10px', fontWeight: 900, color: '#0284c7' }}>{t.codigoTicket}</span>
-                    <p style={{ fontSize: '12px', fontWeight: 'bold', margin: '4px 0' }}>{t.categoria?.nombre || 'Incidencia'}</p>
-                    <button 
-                      onClick={() => onTicketSelect(t.id)}
-                      style={{ width: '100%', backgroundColor: '#2563eb', color: 'white', border: 'none', padding: '6px', borderRadius: '6px', fontWeight: 'bold', fontSize: '11px', cursor: 'pointer' }}
-                    >
-                      Ver Expediente
-                    </button>
-                  </div>
-                </Popup>
-              </Marker>
-            );
-          })}
-        </MapContainer>
-      </div>
+      {/* CONTENEDOR MAPBOX */}
+      <div ref={mapContainerRef} style={{ flex: 1, width: '100%', height: '100%' }} />
 
       {/* ETIQUETA INFERIOR */}
-      <div style={{ position: 'absolute', bottom: '16px', left: '16px', backgroundColor: 'rgba(15, 23, 42, 0.9)', color: 'white', padding: '8px 14px', borderRadius: '10px', zIndex: 1000, backdropFilter: 'blur(4px)', boxShadow: '0 4px 6px rgba(0,0,0,0.2)' }}>
+      <div style={{ position: 'absolute', bottom: '16px', left: '16px', backgroundColor: 'rgba(15, 23, 42, 0.9)', color: 'white', padding: '8px 14px', borderRadius: '10px', zIndex: 10, backdropFilter: 'blur(4px)', boxShadow: '0 4px 6px rgba(0,0,0,0.2)' }}>
         <span style={{ display: 'block', fontSize: '8px', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase' }}>Zona Operativa C4</span>
         <span style={{ fontSize: '12px', fontWeight: 900, color: '#38bdf8' }}>{uvActual ? uvActual.nombre : 'Comuna de Buin'}</span>
       </div>
