@@ -6,7 +6,6 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 
 import buinBoundary from '../data/buin-boundary.json';
 
-// Imports de unidades vecinales
 import uvBuinCentro from '../data/unidades-vecinales/unidad-vecinal-3.json';
 import uvBuinPoniente from '../data/unidades-vecinales/unidad-vecinal-1.json';
 import uvBuinNorte from '../data/unidades-vecinales/unidad-vecinal-16.json';
@@ -69,7 +68,6 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
 
   const uvActual = UNIDADES_VECINALES.find(uv => uv.id === uvSeleccionadaId);
 
-  // Inicialización de Mapbox GL
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
@@ -147,7 +145,6 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
     return () => map.remove();
   }, []);
 
-  // Actualizar UV Seleccionada en el Mapa
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
@@ -171,7 +168,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
   }, [mostrarBordesUV]);
 
   // ==========================================
-  // INYECCIÓN DE MARCADORES (INCLUYENDO GIFS)
+  // LÓGICA DE MARCADORES CON ESCALADO 3D
   // ==========================================
   useEffect(() => {
     const map = mapRef.current;
@@ -195,26 +192,26 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       popupNode.querySelector(`#btn-ticket-${t.id}`)?.addEventListener('click', () => onTicketSelect(t.id));
       const popup = new mapboxgl.Popup({ offset: 25 }).setDOMContent(popupNode);
 
-      // Verificamos si es categoría 1 (Auto abandonado)
       const esAuto = t.categoria?.id === 1 || t.categoria?.nombre?.includes('Vehículo');
       let marker: mapboxgl.Marker;
 
       if (esAuto) {
-        // Crear elemento DOM personalizado para nuestro Sprite 2.5D
         const customMarkerDiv = document.createElement('div');
         customMarkerDiv.className = 'marcador-25d auto-abandonado';
+        customMarkerDiv.style.setProperty('--escala-zoom', '1');
 
-        marker = new mapboxgl.Marker({ element: customMarkerDiv })
+        marker = new mapboxgl.Marker({ 
+          element: customMarkerDiv,
+          anchor: 'bottom' // ¡ESTO EVITA QUE SE MUEVA O RESBALE AL ROTAR!
+        })
           .setLngLat([t.longitud, t.latitud])
           .setPopup(popup)
           .addTo(map);
 
-        // Cuando el usuario hace clic (abre el popup), mantenemos la animación
         popup.on('open', () => customMarkerDiv.classList.add('activo'));
         popup.on('close', () => customMarkerDiv.classList.remove('activo'));
 
       } else {
-        // Marcador por defecto para el resto de categorías (Pin azul)
         marker = new mapboxgl.Marker({ color: '#2563eb' })
           .setLngLat([t.longitud, t.latitud])
           .setPopup(popup)
@@ -224,19 +221,31 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       markers.push(marker);
     });
 
-    // LÓGICA DE PROXIMIDAD: Reproducir todos los GIFs si hacemos mucho zoom (Zoom > 16)
+    // LÓGICA DE ESCALA DINÁMICA: Ajusta el tamaño de los íconos matemáticamente según el Zoom
     const revisarZoom = () => {
       const currentZoom = map.getZoom();
+      
+      // Matemática: El zoom base es 15.5. Cada vez que hacemos zoom, el tamaño se multiplica proporcionalmente.
+      // Math.max(..., 0.35) evita que se hagan invisibles al alejar mucho la cámara.
+      const escala = Math.max(Math.pow(2, currentZoom - 15.5), 0.35);
+
       const tokensAnimados = document.querySelectorAll('.marcador-25d');
-      if (currentZoom >= 16.5) {
-        tokensAnimados.forEach(token => token.classList.add('zoom-cercano'));
-      } else {
-        tokensAnimados.forEach(token => token.classList.remove('zoom-cercano'));
-      }
+      tokensAnimados.forEach(token => {
+        const div = token as HTMLElement;
+        // Inyectamos la variable matemática en el CSS del ícono
+        div.style.setProperty('--escala-zoom', escala.toString());
+
+        if (currentZoom >= 16.5) {
+          div.classList.add('zoom-cercano');
+        } else {
+          div.classList.remove('zoom-cercano');
+        }
+      });
     };
 
+    // Usar evento "zoom" (se dispara 60 veces por segundo al hacer scroll) para que escale fluido
     map.on('zoom', revisarZoom);
-    revisarZoom(); // Ejecutar 1 vez al cargar para verificar zoom inicial
+    revisarZoom(); 
 
     return () => {
       markers.forEach((m) => m.remove());
@@ -259,50 +268,53 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
 
-      {/* ESTILOS CSS INYECTADOS PARA LOS MARCADORES 2.5D */}
       <style>{`
         .marcador-25d {
-          width: 55px;
-          height: 55px;
+          /* El tamaño final se calcula multiplicando 70px por la variable matemática inyectada desde JS */
+          width: calc(70px * var(--escala-zoom, 1));
+          height: calc(70px * var(--escala-zoom, 1));
           background-size: contain;
           background-repeat: no-repeat;
-          background-position: center;
+          
+          /* CLAVE PARA QUE TOQUE EL SUELO EXACTAMENTE */
+          background-position: center bottom; 
+          transform-origin: bottom center; 
+
           cursor: pointer;
-          /* Transición suave de elevación 2.5D */
-          transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); 
-          /* Sombra en el suelo del mapa */
+          
+          /* Se quitó width/height de aquí para que escale con el scroll a 60fps sin retrasos, 
+             dejando solo las animaciones bonitas en la transición */
+          transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), filter 0.3s; 
           filter: drop-shadow(0px 8px 4px rgba(0,0,0,0.3)); 
           z-index: 1;
         }
 
-        /* ESTADO POR DEFECTO: CONGELADO (Usa la imagen PNG estática) */
         .marcador-25d.auto-abandonado {
           background-image: url('/marcadores/auto-estatico.png');
         }
 
-        /* ESTADO 1: HOVER (Pasar el mouse) -> Cambia a GIF y se eleva */
+        /* Ahora usamos porcentajes en TranslateY (-10%) para que la elevación 
+           sea perfecta sin importar si el auto está gigante o enano */
         .marcador-25d.auto-abandonado:hover {
           background-image: url('/marcadores/ezgif-maker.gif');
-          transform: translateY(-8px) scale(1.1);
+          transform: translateY(-10%) scale(1.1);
           filter: drop-shadow(0px 16px 8px rgba(0,0,0,0.3));
           z-index: 10;
         }
 
-        /* ESTADO 2: SELECCIONADO (Clic/Popup abierto) -> Cambia a GIF, se eleva más y brilla */
         .marcador-25d.auto-abandonado.activo {
           background-image: url('/marcadores/ezgif-maker.gif');
-          transform: translateY(-10px) scale(1.2);
+          transform: translateY(-15%) scale(1.2);
           filter: drop-shadow(0px 20px 10px rgba(0,0,0,0.2)) drop-shadow(0 0 12px rgba(56, 189, 248, 0.8));
           z-index: 20;
         }
 
-        /* ESTADO 3: ZOOM PROFUNDO -> Reproduce los GIFs automáticamente */
         .marcador-25d.auto-abandonado.zoom-cercano {
           background-image: url('/marcadores/ezgif-maker.gif');
         }
       `}</style>
 
-      {/* MENÚ DESPLEGABLE SUPERIOR FLOTANTE */}
+      {/* MENÚ DESPLEGABLE */}
       <div style={{ position: 'absolute', top: '16px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '8px 12px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', gap: '8px' }}>
         <label htmlFor="select-uv" style={{ fontSize: '12px', fontWeight: 800, color: '#1e293b' }}>Unidad Vecinal:</label>
         <select id="select-uv" value={uvSeleccionadaId} onChange={(e) => setUvSeleccionadaId(e.target.value)} style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 600, backgroundColor: '#ffffff', color: '#0f172a', cursor: 'pointer', outline: 'none' }}>
@@ -312,7 +324,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         </select>
       </div>
 
-      {/* PANEL FLOTANTE DE CAPAS Y MODO 2D/3D */}
+      {/* PANEL FLOTANTE */}
       <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 10, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '12px 16px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <span style={{ fontSize: '12px', fontWeight: 900, color: '#0f172a' }}>CAPAS DEL MAPA</span>
         <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}>
