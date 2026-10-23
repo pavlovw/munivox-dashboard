@@ -76,9 +76,13 @@ export default function DepartamentoDashboard() {
     }
   }, [session]);
 
-  const cargarDatos = async () => {
+    // 1. Modificar cargarDatos para aceptar un modo silencioso
+  const cargarDatos = async (silencioso = false) => {
     if (infoDepartamento.id === 0) return;
-    setCargando(true);
+    
+    // Solo muestra la pantalla de carga la primera vez
+    if (!silencioso) setCargando(true); 
+    
     try {
       const resTickets = await fetch(`${API_URL}/tickets?departamentoId=${infoDepartamento.id}`);
       if (resTickets.ok) {
@@ -89,20 +93,24 @@ export default function DepartamentoDashboard() {
       const resFuncionarios = await fetch(`${API_URL}/operadores?departamentoId=${infoDepartamento.id}&rol=TERRENO`);
       if (resFuncionarios.ok) {
         const dataFuncionarios = await resFuncionarios.json();
-        setFuncionarios(dataFuncionarios);
+        
+        // Filtrar duplicados por ID para evitar que salgan repetidos por errores previos en la DB
+        const funcionariosUnicos = Array.from(new Map(dataFuncionarios.map((f: any) => [f.id, f])).values());
+        setFuncionarios(funcionariosUnicos as Funcionario[]);
       }
     } catch (error) {
       console.error('Error sincronizando datos:', error);
     } finally {
-      setCargando(false);
+      if (!silencioso) setCargando(false);
     }
   };
 
+  // 2. Actualizar el useEffect para usar el modo silencioso en el intervalo
   useEffect(() => {
     if (session?.user) {
-      cargarDatos();
-      // Auto-refrescar cada 15 segundos para mantener las notificaciones y el GPS sincronizados
-      const interval = setInterval(cargarDatos, 15000);
+      cargarDatos(); // Carga inicial con animación
+      // Actualización en segundo plano cada 15s (sin interrumpir la interfaz)
+      const interval = setInterval(() => cargarDatos(true), 15000);
       return () => clearInterval(interval);
     }
   }, [session, infoDepartamento.id]);
@@ -433,7 +441,7 @@ export default function DepartamentoDashboard() {
 
         <MapComponent 
           tickets={ticketsEnMapa} 
-          fantasmas={funcionarios} 
+          fantasmas={modoDespacho ? funcionarios : []} // Solo muestra los móviles al iniciar despacho
           coordenadaSeleccionada={ticketSeleccionado && modoDespacho ? [ticketSeleccionado.latitud!, ticketSeleccionado.longitud!] : null} 
           onTicketSelect={(id) => {
             const t = tickets.find(x => x.id === id);

@@ -72,6 +72,7 @@ export default function Dashboard() {
 
     if (session?.user?.email) {
       const email = session.user.email.toLowerCase();
+      const prefijo = email.split('@')[0]; // Extraemos antes de la arroba
       
       const inicializarSesion = async () => {
         try {
@@ -85,14 +86,14 @@ export default function Dashboard() {
             })
           });
 
-          // SI ES FUNCIONARIO DE TERRENO (contiene 'terreno' o tiene un punto como juan.aseo)
-          if (email.includes('terreno') || (email.includes('.') && !email.startsWith('operador'))) {
+          // SI ES FUNCIONARIO DE TERRENO (ej: juan.aseo o terreno.aseo)
+          if (prefijo.includes('terreno') || prefijo.includes('.')) {
             router.push('/terreno');
             return;
           }
 
-          // SI NO ES EL OPERADOR CENTRAL, ENVIARLO A DEPARTAMENTOS
-          if (!email.startsWith('operador')) {
+          // SI NO ES EL OPERADOR CENTRAL, ENVIARLO A DEPARTAMENTOS (ej: aseo)
+          if (!prefijo.startsWith('operador')) {
             router.push('/departamentos');
             return;
           }
