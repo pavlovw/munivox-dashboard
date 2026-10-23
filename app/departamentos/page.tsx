@@ -74,15 +74,14 @@ export default function DepartamentoDashboard() {
       const resTickets = await fetch(`${API_URL}/tickets?departamentoId=${infoDepartamento.id}`);
       if (resTickets.ok) {
         const dataTickets = await resTickets.json();
-        // Filtrar solo los que están listos para despacho o ya despachados
         setTickets(dataTickets.filter((t: Ticket) => t.estado !== 'RESUELTO' && t.estado !== 'DESCARTADO'));
       }
 
-      // 2. Cargar funcionarios en terreno de este departamento (con GPS activo)
-      // Este endpoint debes crearlo en la Lambda (GET /operadores?departamentoId=X&rol=TERRENO)
-      const resFuncionarios = await fetch(`${API_URL}/operadores?departamentoId=${infoDepartamento.id}&rol=TERRENO&gpsActivo=true`);
+      // 2. Cargar TODOS los funcionarios en terreno de este departamento (con o sin GPS activo para el listado)
+      const resFuncionarios = await fetch(`${API_URL}/operadores?departamentoId=${infoDepartamento.id}&rol=TERRENO`);
       if (resFuncionarios.ok) {
-        setFuncionarios(await resFuncionarios.json());
+        const dataFuncionarios = await resFuncionarios.json();
+        setFuncionarios(dataFuncionarios);
       }
     } catch (error) {
       console.error('Error sincronizando datos:', error);
@@ -99,7 +98,7 @@ export default function DepartamentoDashboard() {
 
   const abrirTicket = (ticket: Ticket) => {
     setTicketSeleccionado(ticket);
-    setModoDespacho(false); // Por defecto muestra el detalle, el usuario debe activar el modo despacho
+    setModoDespacho(false);
   };
 
   const cerrarTicket = () => {
@@ -122,7 +121,7 @@ export default function DepartamentoDashboard() {
       });
 
       if (res.ok) {
-        await cargarDatos(); // Recargar todo para actualizar estados
+        await cargarDatos();
         cerrarTicket();
       } else {
         alert("Error al asignar el funcionario.");
@@ -134,14 +133,12 @@ export default function DepartamentoDashboard() {
     }
   };
 
-  // Filtrado de mapa: Si hay un ticket seleccionado y modo despacho activo, ocultar los demás
   const ticketsEnMapa = (ticketSeleccionado && modoDespacho) 
     ? tickets.filter(t => t.id === ticketSeleccionado.id) 
     : tickets;
 
-  // Calculadora de distancia simple (Haversine básico) para ordenar funcionarios por cercanía
   const calcularDistancia = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-    const R = 6371; // km
+    const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
     const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
@@ -167,7 +164,6 @@ export default function DepartamentoDashboard() {
       {/* PANEL LATERAL DEL DEPARTAMENTO */}
       <div style={{ width: '420px', backgroundColor: '#ffffff', borderRight: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', zIndex: 20, boxShadow: '4px 0 15px rgba(0,0,0,0.05)' }}>
         
-        {/* HEADER DEPARTAMENTO */}
         <div style={{ padding: '24px', borderBottom: '1px solid #e2e8f0', backgroundColor: infoDepartamento.color, color: 'white' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
@@ -192,22 +188,18 @@ export default function DepartamentoDashboard() {
             </div>
             <div style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: '6px 12px', borderRadius: '999px', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ width: '8px', height: '8px', backgroundColor: '#4ade80', borderRadius: '50%' }}></span>
-              {funcionarios.length} Móviles en línea
+              {funcionarios.length} Funcionarios Totales
             </div>
           </div>
         </div>
 
-        {/* ÁREA DE CONTENIDO (LISTA O DETALLE) */}
         <div style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f8fafc' }}>
-          
           {cargando ? (
             <div style={{ padding: '40px 20px', textAlign: 'center', color: '#64748b' }}>
               <div style={{ width: '24px', height: '24px', border: '3px solid #0284c7', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 12px auto' }}></div>
               <p style={{ fontSize: '12px', fontWeight: 700 }}>SINCRONIZANDO OPERACIONES...</p>
             </div>
           ) : !ticketSeleccionado ? (
-            
-            // VISTA 1: LISTA DE TICKETS
             <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {tickets.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
@@ -244,10 +236,7 @@ export default function DepartamentoDashboard() {
                 ))
               )}
             </div>
-
           ) : (
-            
-            // VISTA 2: DETALLE DEL TICKET Y DESPACHO
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
               <div style={{ padding: '16px 20px', backgroundColor: 'white', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'sticky', top: 0, zIndex: 10 }}>
                 <button 
@@ -273,15 +262,11 @@ export default function DepartamentoDashboard() {
                   </p>
                 </div>
 
-                {/* CONTROLES DE DESPACHO */}
                 <div style={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-                  
                   {!modoDespacho ? (
                     <button 
                       onClick={() => setModoDespacho(true)}
-                      style={{ width: '100%', backgroundColor: infoDepartamento.color, color: 'white', padding: '16px', borderRadius: '12px', border: 'none', fontWeight: 900, fontSize: '14px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer', transition: 'transform 0.1s' }}
-                      onMouseDown={e => e.currentTarget.style.transform = 'scale(0.98)'}
-                      onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
+                      style={{ width: '100%', backgroundColor: infoDepartamento.color, color: 'white', padding: '16px', borderRadius: '12px', border: 'none', fontWeight: 900, fontSize: '14px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
                     >
                       <FiTarget size={18} /> INICIAR PROTOCOLO DE DESPACHO
                     </button>
@@ -289,17 +274,17 @@ export default function DepartamentoDashboard() {
                     <>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                         <h3 style={{ fontSize: '12px', fontWeight: 900, color: '#0f172a', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <FiTruck color="#0284c7" /> UNIDADES EN TERRENO
+                          <FiTruck color="#0284c7" /> PERSONAL DISPONIBLE
                         </h3>
                         <span style={{ fontSize: '10px', backgroundColor: '#e0f2fe', color: '#0284c7', padding: '4px 8px', borderRadius: '8px', fontWeight: 800 }}>
-                          GPS ACTIVO
+                          LISTA GENERAL
                         </span>
                       </div>
 
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                         {funcionariosOrdenados.length === 0 ? (
                           <div style={{ padding: '20px', textAlign: 'center', backgroundColor: '#f8fafc', borderRadius: '12px', border: '1px dashed #cbd5e1' }}>
-                            <p style={{ fontSize: '12px', color: '#64748b', fontWeight: 600, margin: 0 }}>No hay unidades de {infoDepartamento.nombre} transmitiendo ubicación en este momento.</p>
+                            <p style={{ fontSize: '12px', color: '#64748b', fontWeight: 600, margin: 0 }}>No hay funcionarios registrados en {infoDepartamento.nombre}.</p>
                           </div>
                         ) : (
                           funcionariosOrdenados.map((func) => {
@@ -312,9 +297,14 @@ export default function DepartamentoDashboard() {
                             return (
                               <div key={func.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', backgroundColor: esAsignado ? '#ecfdf5' : '#f8fafc', border: esAsignado ? '1px solid #10b981' : '1px solid #e2e8f0', borderRadius: '12px' }}>
                                 <div>
-                                  <span style={{ display: 'block', fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>{func.nombre}</span>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>{func.nombre}</span>
+                                    <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', backgroundColor: func.gpsActivo ? '#dcfce7' : '#f1f5f9', color: func.gpsActivo ? '#166534' : '#64748b', fontWeight: 800 }}>
+                                      {func.gpsActivo ? 'GPS ON' : 'GPS OFF'}
+                                    </span>
+                                  </div>
                                   <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#64748b', marginTop: '4px', fontWeight: 600 }}>
-                                    <FiClock size={10} /> a {dist} km del incidente
+                                    <FiClock size={10} /> a {dist} km aprox.
                                   </span>
                                 </div>
                                 <button 
@@ -350,20 +340,17 @@ export default function DepartamentoDashboard() {
       </div>
 
       {/* MAPA */}
-      {/* Al activar modo despacho, el mapa recibirá solo el ticket seleccionado para enfocar la vista, y los funcionarios como "fantasmas" o flota */}
       <div style={{ flex: 1, position: 'relative', backgroundColor: '#e2e8f0' }}>
-        
-        {/* Overlay indicador de modo despacho en el mapa */}
         {modoDespacho && (
           <div style={{ position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 30, backgroundColor: 'rgba(15, 23, 42, 0.9)', color: 'white', padding: '12px 24px', borderRadius: '999px', display: 'flex', alignItems: 'center', gap: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)' }}>
             <div style={{ width: '10px', height: '10px', backgroundColor: '#ef4444', borderRadius: '50%', animation: 'pulse 1.5s infinite' }}></div>
-            <span style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '1px' }}>MODO DESPACHO ACTIVO • LOCALIZANDO UNIDADES</span>
+            <span style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '1px' }}>MODO DESPACHO ACTIVO • RASTREANDO UNIDADES</span>
           </div>
         )}
 
         <MapComponent 
           tickets={ticketsEnMapa} 
-          fantasmas={modoDespacho ? funcionarios : []} // Pasamos los funcionarios al mapa cuando estamos en modo despacho
+          fantasmas={funcionarios} // El componente Map filtra internamente solo los que tienen gpsActivo === true
           coordenadaSeleccionada={ticketSeleccionado && modoDespacho ? [ticketSeleccionado.latitud!, ticketSeleccionado.longitud!] : null} 
           onTicketSelect={(id) => {
             const t = tickets.find(x => x.id === id);
