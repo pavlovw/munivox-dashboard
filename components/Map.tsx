@@ -88,6 +88,20 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       const layers = map.getStyle().layers;
       const labelLayerId = layers?.find(layer => layer.type === 'symbol' && layer.layout?.['text-field'])?.id;
 
+      // 1. MODIFICAR COLORES BASE DE MAPBOX (Gris oscuro con calles blancas)
+      layers?.forEach(layer => {
+        if (layer.type === 'background') {
+          map.setPaintProperty(layer.id, 'background-color', '#cbd5e1'); // Terreno Gris
+        }
+        if (layer.id.includes('landuse') || layer.id.includes('landcover')) {
+          map.setPaintProperty(layer.id, 'fill-color', '#cbd5e1'); // Terreno Gris
+        }
+        if (layer.id.includes('road') && layer.type === 'line') {
+          map.setPaintProperty(layer.id, 'line-color', '#ffffff'); // Calles Blancas
+        }
+      });
+
+      // 2. EDIFICIOS 3D CELESTES
       map.addLayer(
         {
           id: 'edificios-3d',
@@ -106,6 +120,36 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         labelLayerId
       );
 
+      // 3. MÁSCARA INVERTIDA (Sombreado oscuro fuera de Buin)
+      const mundoBoundsLngLat = [ [-180, -90], [180, -90], [180, 90], [-180, 90], [-180, -90] ];
+      const buinRingLngLat = (buinBoundary.geometry.coordinates[0] as [number, number][]);
+      
+      map.addSource('mascara-invertida-src', {
+        type: 'geojson',
+        data: {
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'Polygon',
+              coordinates: [mundoBoundsLngLat, buinRingLngLat] // Exterior mundo, Hueco interior Buin
+            }
+          }]
+        }
+      });
+
+      map.addLayer({
+        id: 'mascara-invertida-fill',
+        type: 'fill',
+        source: 'mascara-invertida-src',
+        paint: {
+          'fill-color': '#0f172a',
+          'fill-opacity': 0.2 // Nivel de sombra fuera de la comuna
+        }
+      }, labelLayerId);
+
+      // 4. LÍMITE DE BUIN
       map.addSource('buin-boundary-src', { type: 'geojson', data: buinBoundary as any });
       map.addLayer({
         id: 'buin-boundary-line',
@@ -114,6 +158,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         paint: { 'line-color': '#000000', 'line-width': 2 },
       });
 
+      // 5. UNIDAD VECINAL SELECCIONADA
       map.addSource('uv-seleccionada-src', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
       map.addLayer({
         id: 'uv-seleccionada-fill',
@@ -128,6 +173,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         paint: { 'line-color': '#0284c7', 'line-width': 2 },
       });
 
+      // 6. LÍMITES VECINALES (RAYADOS)
       UNIDADES_VECINALES.forEach((uv) => {
         if (uv.id !== 'TODAS' && uv.data) {
           map.addSource(`uv-borde-${uv.id}-src`, { type: 'geojson', data: uv.data as any });
@@ -168,7 +214,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
   }, [mostrarBordesUV]);
 
   // ==========================================
-  // LÓGICA DE MARCADORES (SIN WOBBLE)
+  // LÓGICA DE MARCADORES MULTICATEGORÍA
   // ==========================================
   useEffect(() => {
     const map = mapRef.current;
@@ -192,17 +238,29 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       popupNode.querySelector(`#btn-ticket-${t.id}`)?.addEventListener('click', () => onTicketSelect(t.id));
       const popup = new mapboxgl.Popup({ offset: 25 }).setDOMContent(popupNode);
 
-      const esAuto = t.categoria?.id === 1 || t.categoria?.nombre?.includes('Vehículo');
+      // ASIGNACIÓN DINÁMICA DE CLASES POR CATEGORÍA
+      const catId = t.categoria?.id;
+      const catName = t.categoria?.nombre || '';
+      let claseMarcador = '';
+
+      if (catId === 1 || catName.includes('Vehículo')) claseMarcador = 'auto-abandonado';
+      else if (catId === 2 || catName.includes('basura') || catName.includes('escombros')) claseMarcador = 'basura';
+      else if (catId === 3 || catName.includes('Alumbrado')) claseMarcador = 'alumbrado';
+      else if (catId === 4 || catName.includes('Ruido') || catName.includes('Fiestas')) claseMarcador = 'ruidos';
+      else if (catId === 5 || catName.includes('Bache') || catName.includes('vial')) claseMarcador = 'bache';
+      else if (catId === 6 || catName.includes('Animal')) claseMarcador = 'animales';
+      else if (catId === 7 || catName.includes('Señalética')) claseMarcador = 'senaletica';
+      else if (catId === 8 || catName.includes('verde') || catName.includes('Riego')) claseMarcador = 'riego';
+
       let marker: mapboxgl.Marker;
 
-      if (esAuto) {
-        // Contenedor estático para Mapbox (Evita el tambaleo)
+      // Si pertenece a alguna de nuestras 8 categorías con diseño 2.5D
+      if (claseMarcador) {
         const customMarkerContainer = document.createElement('div');
         customMarkerContainer.className = 'marcador-container';
 
-        // Elemento visual interno que reacciona a las animaciones
         const customMarkerImg = document.createElement('div');
-        customMarkerImg.className = 'marcador-img auto-abandonado';
+        customMarkerImg.className = `marcador-img ${claseMarcador}`;
 
         customMarkerContainer.appendChild(customMarkerImg);
 
@@ -218,6 +276,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         popup.on('close', () => customMarkerImg.classList.remove('activo'));
 
       } else {
+        // Marcador normal (Pin Azul) por si cae otra categoría
         marker = new mapboxgl.Marker({ color: '#2563eb' })
           .setLngLat([t.longitud, t.latitud])
           .setPopup(popup)
@@ -246,14 +305,14 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
     <div style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
 
       <style>{`
-        /* 1. EL CONTENEDOR ESTÁTICO (Aquí Mapbox hace su trabajo sin interferencias CSS) */
+        /* CONTENEDOR ESTÁTICO DE MAPBOX */
         .marcador-container {
           width: 65px;
           height: 65px;
           z-index: 1;
         }
 
-        /* 2. LA IMAGEN ANIMADA (Solo anima filtros y escala, NO el movimiento del mapa) */
+        /* REGLAS BASE PARA TODAS LAS IMÁGENES ANIMADAS 2.5D */
         .marcador-img {
           width: 100%;
           height: 100%;
@@ -263,29 +322,69 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
           transform-origin: bottom center; 
           cursor: pointer;
           
-          /* Solo animamos el hover, evitando conflictos con Mapbox */
+          /* Animaciones unificadas para hover y clic */
           transition: transform 0.2s ease, filter 0.2s ease; 
           filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.3)); 
         }
 
-        .marcador-img.auto-abandonado {
-          background-image: url('/marcadores/auto-estatico.png');
+        /* COMPORTAMIENTO HOVER (Disminuido para no crecer exageradamente) */
+        .marcador-img:hover {
+          transform: translateY(-2px) scale(1.02); /* Apenas crece y se eleva */
+          filter: drop-shadow(0px 6px 4px rgba(0,0,0,0.4));
         }
 
-        .marcador-img.auto-abandonado:hover {
-          background-image: url('/marcadores/ezgif-maker.gif');
-          transform: translateY(-4px) scale(1.1);
-          filter: drop-shadow(0px 8px 6px rgba(0,0,0,0.4));
+        /* COMPORTAMIENTO CLIC / ACTIVO (Pequeño, sin aumento, solo resplandor) */
+        .marcador-img.activo {
+          transform: translateY(0px) scale(1); /* No aumenta su tamaño */
+          filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.3)) drop-shadow(0 0 12px rgba(56, 189, 248, 0.9)); /* Resplandor celeste */
         }
 
-        .marcador-img.auto-abandonado.activo {
-          background-image: url('/marcadores/ezgif-maker.gif');
-          transform: translateY(-8px) scale(1.15);
-          filter: drop-shadow(0px 10px 8px rgba(0,0,0,0.4)) drop-shadow(0 0 10px rgba(56, 189, 248, 0.8));
-        }
+        /* ==================================================== */
+        /* CATEGORÍA 1: AUTO ABANDONADO */
+        .marcador-img.auto-abandonado { background-image: url('/marcadores/auto-estatico.png'); }
+        .marcador-img.auto-abandonado:hover, 
+        .marcador-img.auto-abandonado.activo { background-image: url('/marcadores/ezgif-maker.gif'); }
+
+        /* CATEGORÍA 2: BASURA / ESCOMBROS */
+        .marcador-img.basura { background-image: url('/marcadores/basura-estatica.png'); }
+        .marcador-img.basura:hover, 
+        .marcador-img.basura.activo { background-image: url('/marcadores/basura.gif'); }
+
+        /* ==================================================== */
+        /* RESERVAS PARA FUTURAS CATEGORÍAS (Descomenta y sube las imágenes a la carpeta /marcadores/ cuando las tengas) */
+        
+        /* CATEGORÍA 3: ALUMBRADO */
+        .marcador-img.alumbrado { background-image: url('/marcadores/alumbrado-estatico.png'); }
+        .marcador-img.alumbrado:hover, .marcador-img.alumbrado.activo { background-image: url('/marcadores/alumbrado.gif'); }
+        
+
+        /* CATEGORÍA 4: RUIDOS */
+        .marcador-img.ruidos { background-image: url('/marcadores/ruidos-estatico.png'); }
+        .marcador-img.ruidos:hover, .marcador-img.ruidos.activo { background-image: url('/marcadores/ruidos.gif'); }
+        
+
+        /* CATEGORÍA 5: BACHE / DAÑO VIAL
+        .marcador-img.bache { background-image: url('/marcadores/bache-estatico.png'); }
+        .marcador-img.bache:hover, .marcador-img.bache.activo { background-image: url('/marcadores/bache.gif'); }
+        */
+
+        /* CATEGORÍA 6: ANIMALES SUELTOS
+        .marcador-img.animales { background-image: url('/marcadores/animales-estatico.png'); }
+        .marcador-img.animales:hover, .marcador-img.animales.activo { background-image: url('/marcadores/animales.gif'); }
+        */
+
+        /* CATEGORÍA 7: SEÑALÉTICA
+        .marcador-img.senaletica { background-image: url('/marcadores/senaletica-estatico.png'); }
+        .marcador-img.senaletica:hover, .marcador-img.senaletica.activo { background-image: url('/marcadores/senaletica.gif'); }
+        */
+
+        /* CATEGORÍA 8: ÁREAS VERDES / RIEGO
+        .marcador-img.riego { background-image: url('/marcadores/riego-estatico.png'); }
+        .marcador-img.riego:hover, .marcador-img.riego.activo { background-image: url('/marcadores/riego.gif'); }
+        */
       `}</style>
 
-      {/* MENÚ DESPLEGABLE */}
+      {/* MENÚ DESPLEGABLE SUPERIOR */}
       <div style={{ position: 'absolute', top: '16px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '8px 12px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', gap: '8px' }}>
         <label htmlFor="select-uv" style={{ fontSize: '12px', fontWeight: 800, color: '#1e293b' }}>Unidad Vecinal:</label>
         <select id="select-uv" value={uvSeleccionadaId} onChange={(e) => setUvSeleccionadaId(e.target.value)} style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 600, backgroundColor: '#ffffff', color: '#0f172a', cursor: 'pointer', outline: 'none' }}>
@@ -295,7 +394,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         </select>
       </div>
 
-      {/* PANEL FLOTANTE */}
+      {/* PANEL FLOTANTE LATERAL */}
       <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 10, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '12px 16px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <span style={{ fontSize: '12px', fontWeight: 900, color: '#0f172a' }}>CAPAS DEL MAPA</span>
         <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}>
@@ -309,6 +408,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
 
       <div ref={mapContainerRef} style={{ flex: 1, width: '100%', height: '100%' }} />
 
+      {/* ETIQUETA INFERIOR */}
       <div style={{ position: 'absolute', bottom: '16px', left: '16px', backgroundColor: 'rgba(15, 23, 42, 0.9)', color: 'white', padding: '8px 14px', borderRadius: '10px', zIndex: 10, backdropFilter: 'blur(4px)', boxShadow: '0 4px 6px rgba(0,0,0,0.2)' }}>
         <span style={{ display: 'block', fontSize: '8px', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase' }}>Zona Operativa C4</span>
         <span style={{ fontSize: '12px', fontWeight: 900, color: '#38bdf8' }}>{uvActual ? uvActual.nombre : 'Comuna de Buin'}</span>
