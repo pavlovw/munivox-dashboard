@@ -148,16 +148,17 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
   }, []);
 
   // Efecto para centrar el mapa cuando se selecciona un ticket
+  // Efecto para centrar el mapa SOLO cuando cambia la coordenada real, no en cada refresco
   useEffect(() => {
-    if (mapRef.current && coordenadaSeleccionada) {
+    if (mapRef.current && coordenadaSeleccionada && coordenadaSeleccionada[0] && coordenadaSeleccionada[1]) {
       mapRef.current.flyTo({
         center: [coordenadaSeleccionada[1], coordenadaSeleccionada[0]], // Mapbox usa [longitud, latitud]
         zoom: 16,
         essential: true,
-        duration: 1500 // 1.5 segundos de animación suave
+        duration: 1500
       });
     }
-  }, [coordenadaSeleccionada]);
+  }, [coordenadaSeleccionada?.[0], coordenadaSeleccionada?.[1]]); // 👈 ESTA LÍNEA ES LA CLAVE
 
   // Efectos de UVs
   useEffect(() => {
