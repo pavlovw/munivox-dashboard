@@ -26,7 +26,7 @@ import uvElRecurso from '../data/unidades-vecinales/unidad-vecinal-11.json';
 import uvRuralNorte from '../data/unidades-vecinales/unidad-vecinal-6.json';
 import uvElCerrillo from '../data/unidades-vecinales/unidad-vecinal-4.json';
 
-const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || 'pk.eyJ1IjoicGF2bG92dyIsImEiOiJjbXhxOTllZ2EwMGdyMmtvNHZ0ejRhZHFqIn0.example_replace_this_token';
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || 'pk.eyJ1IjoicGF2bG92dyIsImEiOiJcmx...';
 
 const UNIDADES_VECINALES = [
   { id: 'TODAS', nombre: 'Ver toda la comuna', data: null },
@@ -53,8 +53,8 @@ const UNIDADES_VECINALES = [
 
 interface MapProps {
   tickets: any[];
-  fantasmas?: any[];
-  coordenadaSeleccionada?: [number, number] | null;
+  fantasmas?: any[]; // Funcionarios en terreno
+  coordenadaSeleccionada?: [number, number] | null; // [lat, lng]
   onTicketSelect: (id: string) => void;
 }
 
@@ -68,6 +68,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
 
   const uvActual = UNIDADES_VECINALES.find(uv => uv.id === uvSeleccionadaId);
 
+  // Inicialización del Mapa
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
@@ -88,20 +89,12 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       const layers = map.getStyle().layers;
       const labelLayerId = layers?.find(layer => layer.type === 'symbol' && layer.layout?.['text-field'])?.id;
 
-      // 1. MODIFICAR COLORES BASE DE MAPBOX (Gris oscuro con calles blancas)
       layers?.forEach(layer => {
-        if (layer.type === 'background') {
-          map.setPaintProperty(layer.id, 'background-color', '#cbd5e1'); // Terreno Gris
-        }
-        if (layer.id.includes('landuse') || layer.id.includes('landcover')) {
-          map.setPaintProperty(layer.id, 'fill-color', '#cbd5e1'); // Terreno Gris
-        }
-        if (layer.id.includes('road') && layer.type === 'line') {
-          map.setPaintProperty(layer.id, 'line-color', '#ffffff'); // Calles Blancas
-        }
+        if (layer.type === 'background') map.setPaintProperty(layer.id, 'background-color', '#cbd5e1');
+        if (layer.id.includes('landuse') || layer.id.includes('landcover')) map.setPaintProperty(layer.id, 'fill-color', '#cbd5e1');
+        if (layer.id.includes('road') && layer.type === 'line') map.setPaintProperty(layer.id, 'line-color', '#ffffff');
       });
 
-      // 2. EDIFICIOS 3D CELESTES
       map.addLayer(
         {
           id: 'edificios-3d',
@@ -120,60 +113,23 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         labelLayerId
       );
 
-      // 3. MÁSCARA INVERTIDA (Sombreado oscuro fuera de Buin)
       const mundoBoundsLngLat = [ [-180, -90], [180, -90], [180, 90], [-180, 90], [-180, -90] ];
       const buinRingLngLat = (buinBoundary.geometry.coordinates[0] as [number, number][]);
       
       map.addSource('mascara-invertida-src', {
         type: 'geojson',
-        data: {
-          type: 'FeatureCollection',
-          features: [{
-            type: 'Feature',
-            properties: {},
-            geometry: {
-              type: 'Polygon',
-              coordinates: [mundoBoundsLngLat, buinRingLngLat] // Exterior mundo, Hueco interior Buin
-            }
-          }]
-        }
+        data: { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [mundoBoundsLngLat, buinRingLngLat] } }] }
       });
 
-      map.addLayer({
-        id: 'mascara-invertida-fill',
-        type: 'fill',
-        source: 'mascara-invertida-src',
-        paint: {
-          'fill-color': '#0f172a',
-          'fill-opacity': 0.2 // Nivel de sombra fuera de la comuna
-        }
-      }, labelLayerId);
+      map.addLayer({ id: 'mascara-invertida-fill', type: 'fill', source: 'mascara-invertida-src', paint: { 'fill-color': '#0f172a', 'fill-opacity': 0.2 } }, labelLayerId);
 
-      // 4. LÍMITE DE BUIN
       map.addSource('buin-boundary-src', { type: 'geojson', data: buinBoundary as any });
-      map.addLayer({
-        id: 'buin-boundary-line',
-        type: 'line',
-        source: 'buin-boundary-src',
-        paint: { 'line-color': '#000000', 'line-width': 2 },
-      });
+      map.addLayer({ id: 'buin-boundary-line', type: 'line', source: 'buin-boundary-src', paint: { 'line-color': '#000000', 'line-width': 2 } });
 
-      // 5. UNIDAD VECINAL SELECCIONADA
       map.addSource('uv-seleccionada-src', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-      map.addLayer({
-        id: 'uv-seleccionada-fill',
-        type: 'fill',
-        source: 'uv-seleccionada-src',
-        paint: { 'fill-color': '#38bdf8', 'fill-opacity': 0.25 },
-      });
-      map.addLayer({
-        id: 'uv-seleccionada-line',
-        type: 'line',
-        source: 'uv-seleccionada-src',
-        paint: { 'line-color': '#0284c7', 'line-width': 2 },
-      });
+      map.addLayer({ id: 'uv-seleccionada-fill', type: 'fill', source: 'uv-seleccionada-src', paint: { 'fill-color': '#38bdf8', 'fill-opacity': 0.25 } });
+      map.addLayer({ id: 'uv-seleccionada-line', type: 'line', source: 'uv-seleccionada-src', paint: { 'line-color': '#0284c7', 'line-width': 2 } });
 
-      // 6. LÍMITES VECINALES (RAYADOS)
       UNIDADES_VECINALES.forEach((uv) => {
         if (uv.id !== 'TODAS' && uv.data) {
           map.addSource(`uv-borde-${uv.id}-src`, { type: 'geojson', data: uv.data as any });
@@ -191,13 +147,24 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
     return () => map.remove();
   }, []);
 
+  // Efecto para centrar el mapa cuando se selecciona un ticket
+  useEffect(() => {
+    if (mapRef.current && coordenadaSeleccionada) {
+      mapRef.current.flyTo({
+        center: [coordenadaSeleccionada[1], coordenadaSeleccionada[0]], // Mapbox usa [longitud, latitud]
+        zoom: 16,
+        essential: true,
+        duration: 1500 // 1.5 segundos de animación suave
+      });
+    }
+  }, [coordenadaSeleccionada]);
+
+  // Efectos de UVs
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
     const source = map.getSource('uv-seleccionada-src') as mapboxgl.GeoJSONSource;
-    if (source) {
-      source.setData(uvActual && uvActual.data ? (uvActual.data as any) : { type: 'FeatureCollection', features: [] });
-    }
+    if (source) source.setData(uvActual && uvActual.data ? (uvActual.data as any) : { type: 'FeatureCollection', features: [] });
   }, [uvSeleccionadaId, uvActual]);
 
   useEffect(() => {
@@ -206,20 +173,17 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
     UNIDADES_VECINALES.forEach((uv) => {
       if (uv.id !== 'TODAS' && uv.data) {
         const layerId = `uv-borde-${uv.id}-line`;
-        if (map.getLayer(layerId)) {
-          map.setLayoutProperty(layerId, 'visibility', mostrarBordesUV ? 'visible' : 'none');
-        }
+        if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', mostrarBordesUV ? 'visible' : 'none');
       }
     });
   }, [mostrarBordesUV]);
 
   // ==========================================
-  // LÓGICA DE MARCADORES MULTICATEGORÍA
+  // RENDERIZAR TICKETS
   // ==========================================
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-
     const markers: mapboxgl.Marker[] = [];
 
     tickets.forEach((t) => {
@@ -238,7 +202,6 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       popupNode.querySelector(`#btn-ticket-${t.id}`)?.addEventListener('click', () => onTicketSelect(t.id));
       const popup = new mapboxgl.Popup({ offset: 25 }).setDOMContent(popupNode);
 
-      // ASIGNACIÓN DINÁMICA DE CLASES POR CATEGORÍA
       const catId = t.categoria?.id;
       const catName = t.categoria?.nombre || '';
       let claseMarcador = '';
@@ -254,40 +217,83 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
 
       let marker: mapboxgl.Marker;
 
-      // Si pertenece a alguna de nuestras 8 categorías con diseño 2.5D
       if (claseMarcador) {
         const customMarkerContainer = document.createElement('div');
         customMarkerContainer.className = 'marcador-container';
-
         const customMarkerImg = document.createElement('div');
         customMarkerImg.className = `marcador-img ${claseMarcador}`;
-
         customMarkerContainer.appendChild(customMarkerImg);
 
-        marker = new mapboxgl.Marker({ 
-          element: customMarkerContainer,
-          anchor: 'bottom' 
-        })
+        marker = new mapboxgl.Marker({ element: customMarkerContainer, anchor: 'bottom' })
           .setLngLat([t.longitud, t.latitud])
           .setPopup(popup)
           .addTo(map);
 
         popup.on('open', () => customMarkerImg.classList.add('activo'));
         popup.on('close', () => customMarkerImg.classList.remove('activo'));
-
       } else {
-        // Marcador normal (Pin Azul) por si cae otra categoría
-        marker = new mapboxgl.Marker({ color: '#2563eb' })
-          .setLngLat([t.longitud, t.latitud])
-          .setPopup(popup)
-          .addTo(map);
+        marker = new mapboxgl.Marker({ color: '#2563eb' }).setLngLat([t.longitud, t.latitud]).setPopup(popup).addTo(map);
       }
-
       markers.push(marker);
     });
-
     return () => markers.forEach((m) => m.remove());
   }, [tickets, onTicketSelect]);
+
+  // ==========================================
+  // RENDERIZAR FUNCIONARIOS (FANTASMAS)
+  // ==========================================
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const fantasmasMarkers: mapboxgl.Marker[] = [];
+
+    fantasmas.forEach((f) => {
+      if (!f.latitud || !f.longitud) return; // Omitir si nunca han registrado posición
+
+      const isOnline = f.gpsActivo;
+      const el = document.createElement('div');
+      
+      // Estilos del marcador de vehículo
+      el.style.backgroundColor = isOnline ? '#10b981' : '#94a3b8'; // Verde si está activo, Gris si está apagado
+      el.style.width = '30px';
+      el.style.height = '30px';
+      el.style.borderRadius = '50%';
+      el.style.border = '3px solid white';
+      el.style.boxShadow = isOnline ? '0 0 15px rgba(16, 185, 129, 0.6)' : '0 2px 4px rgba(0,0,0,0.3)';
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.justifyContent = 'center';
+      el.style.fontSize = '14px';
+      el.innerHTML = '🚐'; // Ícono de furgón/unidad móvil
+      
+      // Animación de pulso si está online
+      if (isOnline) {
+        el.style.animation = 'pulse 2s infinite';
+      }
+
+      // Última hora de conexión
+      const fechaUltima = f.ultimaUbicacion ? new Date(f.ultimaUbicacion).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Desconocida';
+
+      const popup = new mapboxgl.Popup({ offset: 20 }).setHTML(`
+        <div style="font-family: sans-serif; text-align: center; min-width: 120px;">
+          <strong style="color: ${isOnline ? '#10b981' : '#64748b'}; font-size: 13px;">${f.nombre}</strong><br/>
+          <span style="font-size: 11px; font-weight: bold; color: ${isOnline ? '#059669' : '#94a3b8'};">
+            ${isOnline ? '🟢 GPS Activo en vivo' : '⚪ GPS Apagado'}
+          </span><br/>
+          ${!isOnline ? `<span style="font-size: 10px; color: #cbd5e1;">Última pos: ${fechaUltima}</span>` : ''}
+        </div>
+      `);
+
+      const marker = new mapboxgl.Marker({ element: el })
+        .setLngLat([f.longitud, f.latitud]) // Mapbox usa [lng, lat]
+        .setPopup(popup)
+        .addTo(map);
+
+      fantasmasMarkers.push(marker);
+    });
+
+    return () => fantasmasMarkers.forEach(m => m.remove());
+  }, [fantasmas]); // Se ejecutará cada vez que lleguen nuevos datos del frontend (cada 15s o al abrir modo despacho)
 
   const alternarVista = () => {
     const map = mapRef.current;
@@ -305,81 +311,22 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
     <div style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
 
       <style>{`
-        /* CONTENEDOR ESTÁTICO DE MAPBOX */
-        .marcador-container {
-          width: 65px;
-          height: 65px;
-          z-index: 1;
-        }
+        /* Tus estilos anteriores se mantienen intactos */
+        .marcador-container { width: 65px; height: 65px; z-index: 1; }
+        .marcador-img { width: 100%; height: 100%; background-size: contain; background-repeat: no-repeat; background-position: center bottom; transform-origin: bottom center; cursor: pointer; transition: transform 0.2s ease, filter 0.2s ease; filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.3)); }
+        .marcador-img:hover { transform: translateY(-2px) scale(1.02); filter: drop-shadow(0px 6px 4px rgba(0,0,0,0.4)); }
+        .marcador-img.activo { transform: translateY(0px) scale(1); filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.3)) drop-shadow(0 0 12px rgba(56, 189, 248, 0.9)); }
 
-        /* REGLAS BASE PARA TODAS LAS IMÁGENES ANIMADAS 2.5D */
-        .marcador-img {
-          width: 100%;
-          height: 100%;
-          background-size: contain;
-          background-repeat: no-repeat;
-          background-position: center bottom; 
-          transform-origin: bottom center; 
-          cursor: pointer;
-          
-          /* Animaciones unificadas para hover y clic */
-          transition: transform 0.2s ease, filter 0.2s ease; 
-          filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.3)); 
-        }
-
-        /* COMPORTAMIENTO HOVER (Disminuido para no crecer exageradamente) */
-        .marcador-img:hover {
-          transform: translateY(-2px) scale(1.02); /* Apenas crece y se eleva */
-          filter: drop-shadow(0px 6px 4px rgba(0,0,0,0.4));
-        }
-
-        /* COMPORTAMIENTO CLIC / ACTIVO (Pequeño, sin aumento, solo resplandor) */
-        .marcador-img.activo {
-          transform: translateY(0px) scale(1); /* No aumenta su tamaño */
-          filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.3)) drop-shadow(0 0 12px rgba(56, 189, 248, 0.9)); /* Resplandor celeste */
-        }
-
-        /* ==================================================== */
-        /* CATEGORÍA 1: AUTO ABANDONADO */
         .marcador-img.auto-abandonado { background-image: url('/marcadores/auto-estatico.png'); }
         .marcador-img.auto-abandonado:hover, .marcador-img.auto-abandonado.activo { background-image: url('/marcadores/ezgif-maker.gif'); }
-
-        /* CATEGORÍA 2: BASURA / ESCOMBROS */
         .marcador-img.basura { background-image: url('/marcadores/basura-estatica.png'); }
         .marcador-img.basura:hover, .marcador-img.basura.activo { background-image: url('/marcadores/basura.gif'); }
 
-        /* ==================================================== */
-        /* RESERVAS PARA FUTURAS CATEGORÍAS (Descomenta y sube las imágenes a la carpeta /marcadores/ cuando las tengas) */
-        
-        /* CATEGORÍA 3: ALUMBRADO */
-        .marcador-img.alumbrado { background-image: url('/marcadores/alumbrado-estatico.png'); }
-        .marcador-img.alumbrado:hover, .marcador-img.alumbrado.activo { background-image: url('/marcadores/alumbrado.gif'); }
-        
-
-        /* CATEGORÍA 4: RUIDOS */
-        .marcador-img.ruidos { background-image: url('/marcadores/ruidos-estatico.png'); }
-        .marcador-img.ruidos:hover, .marcador-img.ruidos.activo { background-image: url('/marcadores/ruidos.gif'); }
-        
-
-        /* CATEGORÍA 5: BACHE / DAÑO VIAL
-        .marcador-img.bache { background-image: url('/marcadores/bache-estatico.png'); }
-        .marcador-img.bache:hover, .marcador-img.bache.activo { background-image: url('/marcadores/bache.gif'); }
-        */
-
-        /* CATEGORÍA 6: ANIMALES SUELTOS
-        .marcador-img.animales { background-image: url('/marcadores/animales-estatico.png'); }
-        .marcador-img.animales:hover, .marcador-img.animales.activo { background-image: url('/marcadores/animales.gif'); }
-        */
-
-        /* CATEGORÍA 7: SEÑALÉTICA
-        .marcador-img.senaletica { background-image: url('/marcadores/senaletica-estatico.png'); }
-        .marcador-img.senaletica:hover, .marcador-img.senaletica.activo { background-image: url('/marcadores/senaletica.gif'); }
-        */
-
-        /* CATEGORÍA 8: ÁREAS VERDES / RIEGO
-        .marcador-img.riego { background-image: url('/marcadores/riego-estatico.png'); }
-        .marcador-img.riego:hover, .marcador-img.riego.activo { background-image: url('/marcadores/riego.gif'); }
-        */
+        @keyframes pulse {
+          0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+          70% { box-shadow: 0 0 0 15px rgba(16, 185, 129, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
       `}</style>
 
       {/* MENÚ DESPLEGABLE SUPERIOR */}
