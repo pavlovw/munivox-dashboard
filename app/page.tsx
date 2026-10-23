@@ -57,7 +57,6 @@ export default function Dashboard() {
   const [ticketsCercanos, setTicketsCercanos] = useState<any[]>([]);
   const [coordenadaEnfoque, setCoordenadaEnfoque] = useState<[number, number] | null>(null);
 
-  // Estado de derivación con "SIN ASIGNAR" como valor inicial por defecto
   const [departamentoDerivacion, setDepartamentoDerivacion] = useState("SIN ASIGNAR");
 
   const API_GATEWAY_URL = "https://nn4p1ybmu2.execute-api.us-east-2.amazonaws.com";
@@ -73,9 +72,31 @@ export default function Dashboard() {
     }
   };
 
+  // SINCRONIZACIÓN AUTOMÁTICA DEL OPERADOR EN BD POSTGRESQL AL INGRESAR
+  useEffect(() => {
+    if (session?.user?.email) {
+      const sincronizarOperador = async () => {
+        try {
+          await fetch(`${API_GATEWAY_URL}/operadores/sincronizar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: session.user.email,
+              sub: (session.user as any).sub || undefined,
+              nombre: session.user.name || undefined
+            })
+          });
+        } catch (error) {
+          console.error("Error al sincronizar operador con la BD:", error);
+        }
+      };
+
+      sincronizarOperador();
+    }
+  }, [session]);
+
   useEffect(() => {
     fetchTickets();
-    // El WebSocket se mantiene en Azure para recibir notificaciones en tiempo real
     const socket = io("https://socket-service.politeplant-263a4d5b.eastus.azurecontainerapps.io", { transports: ['websocket', 'polling'] });
     socket.on('actualizar_dashboard', () => fetchTickets());
     return () => { socket.disconnect(); };
@@ -91,22 +112,18 @@ export default function Dashboard() {
     });
   }, [tickets, filtroTexto, filtroEstado, filtroPrioridad]);
 
-  // AL ABRIR UN TICKET PENDIENTE, PASA AUTOMÁTICAMENTE A EVALUACIÓN (EN_REVISION)
   const abrirDetalle = async (id: string, lat: number | null, lng: number | null) => {
     try {
       const res = await fetch(`${API_GATEWAY_URL}/tickets/${id}`);
       if (res.ok) {
         const detalle: Ticket = await res.json();
         
-        // Regla C4: Si el caso estaba PENDIENTE, pasa inmediatamente a EN_REVISION al ser inspeccionado
         if (detalle.estado === 'PENDIENTE') {
           await cambiarEstado(detalle.id, 'EN_REVISION');
           detalle.estado = 'EN_REVISION';
         }
 
         setTicketSeleccionado(detalle);
-        
-        // Si el ticket ya posee departamento guardado se asigna, de lo contrario se inicia en "SIN ASIGNAR"
         setDepartamentoDerivacion(detalle.departamento?.nombre || "SIN ASIGNAR");
         
         if (lat && lng) {
@@ -260,7 +277,6 @@ export default function Dashboard() {
             <FiActivity size={16} /> Estadística
           </div>
 
-          {/* MENÚ ADMINISTRATIVO (Solo visible para Jefaturas) */}
           {(session?.user as any)?.role === 'ADMINISTRADOR' && (
             <div 
               onClick={() => setVistaActiva('ADMINISTRACION')}
@@ -270,7 +286,6 @@ export default function Dashboard() {
           )}
         </nav>
 
-        {/* INFO DEL OPERADOR Y BOTÓN CERRAR SESIÓN */}
         <div style={{ margin: '16px', padding: '16px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '16px', backdropFilter: 'blur(4px)', border: '1px solid rgba(255,255,255,0.15)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <span style={{ display: 'block', fontSize: '9px', color: '#bae6fd', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '1px' }}>{(session?.user as any)?.role || 'Operador'} Activo</span>
@@ -289,7 +304,6 @@ export default function Dashboard() {
       {/* CONTENIDO PRINCIPAL */}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         
-        {/* CABECERA SUPERIOR */}
         <header style={{ backgroundColor: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(8px)', borderBottom: '1px solid #e2e8f0', padding: '16px 28px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 10, height: '70px', boxSizing: 'border-box' }}>
           <div>
             <h2 style={{ fontSize: '12px', fontWeight: 900, color: '#1e293b', letterSpacing: '1px', textTransform: 'uppercase', margin: 0 }}>PANEL DE CONTROL GEOESPACIAL</h2>
@@ -307,13 +321,10 @@ export default function Dashboard() {
           </div>
         </header>
         
-        {/* ÁREA DE TRABAJO */}
         <div style={{ flex: 1, display: 'flex', padding: '24px', gap: '24px', overflow: 'hidden', boxSizing: 'border-box' }}>
           
-          {/* RENDERIZADO DEL MAPA Y PANEL LATERAL (Vista por Defecto) */}
           {vistaActiva === 'MAPA' && (
             <>
-              {/* MAPA */}
               <div style={{ flex: 2, backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '24px', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)' }}>
                 <div style={{ backgroundColor: 'white', padding: '14px 20px', borderBottom: '1px solid #f1f5f9', fontSize: '11px', fontWeight: 'bold', color: '#64748b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><FiRadio color="#0ea5e9" /> CARTOGRAFÍA EN TIEMPO REAL</span>
@@ -332,7 +343,6 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* PANEL LATERAL DERECHO */}
               <div style={{ width: '440px', backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '24px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)' }}>
                 
                 {!ticketSeleccionado && (
@@ -424,12 +434,12 @@ export default function Dashboard() {
                                 <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                                   <FiPhone /> {ticket.ciudadano?.telefono?.replace('569', '+56 9 ')}
                                 </span>
+                              </div>
                             </div>
-                          </div>
-                        )
-                      })
-                    )}
-                  </div>
+                          )
+                        })
+                      )}
+                    </div>
                   </>
                 )}
 
@@ -451,7 +461,6 @@ export default function Dashboard() {
 
                     <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', backgroundColor: '#ffffff' }}>
                       
-                      {/* DICTAMEN DE INTELIGENCIA ARTIFICIAL */}
                       <div style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '16px', padding: '16px', boxShadow: '0 4px 6px -1px rgba(217,119,6,0.1)' }}>
                          <h4 style={{ fontSize: '10px', fontWeight: 900, color: '#d97706', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <FiCpu size={14} /> DICTAMEN DE INTELIGENCIA ARTIFICIAL
@@ -517,14 +526,12 @@ export default function Dashboard() {
                       </div>
                     </div>
 
-                    {/* PANEL DE DESPACHO INTERACTIVO CON RECOMENDACIÓN DE LA IA */}
                     {ticketSeleccionado.estado !== 'RESUELTO' && (
                       <div style={{ padding: '20px', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
                         <label style={{ fontSize: '10px', fontWeight: 900, color: '#475569', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px', display: 'block' }}>
                           PANEL DE DESPACHO MUNICIPAL
                         </label>
 
-                        {/* BANNER DE RECOMENDACIÓN IA */}
                         <div style={{ backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', padding: '10px 14px', borderRadius: '12px', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                           <span style={{ fontSize: '10px', fontWeight: 800, color: '#1e40af', textTransform: 'uppercase' }}>
                             🤖 RECOMENDACIÓN IA:
@@ -570,7 +577,6 @@ export default function Dashboard() {
             </>
           )}
 
-          {/* RENDERIZADO DEL TABLERO KANBAN */}
           {vistaActiva === 'KANBAN' && (
               <div style={{ flex: 1, backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '24px', padding: '24px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 <div style={{ marginBottom: '20px' }}>
@@ -587,17 +593,15 @@ export default function Dashboard() {
                     }
                   }} 
                 />
-              </div> //ola
+              </div>
             )}
 
-          {/* RENDERIZADO DE ESTADÍSTICAS */}
           {vistaActiva === 'ESTADISTICA' && (
               <div style={{ flex: 1, overflow: 'hidden' }}>
                 <Estadisticas tickets={ticketsFiltrados} />
               </div>
           )}
 
-          {/* RENDERIZADO DEL PANEL DE ADMINISTRACIÓN (Solo si eres admin) */}
           {vistaActiva === 'ADMINISTRACION' && (session?.user as any)?.role === 'ADMINISTRADOR' && (
               <div style={{ flex: 1, overflow: 'hidden' }}>
                 <AdminPanel />
