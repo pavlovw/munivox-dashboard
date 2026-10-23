@@ -168,7 +168,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
   }, [mostrarBordesUV]);
 
   // ==========================================
-  // LÓGICA DE MARCADORES CON ESCALADO 3D
+  // LÓGICA DE MARCADORES (SIN WOBBLE)
   // ==========================================
   useEffect(() => {
     const map = mapRef.current;
@@ -196,20 +196,26 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       let marker: mapboxgl.Marker;
 
       if (esAuto) {
-        const customMarkerDiv = document.createElement('div');
-        customMarkerDiv.className = 'marcador-25d auto-abandonado';
-        customMarkerDiv.style.setProperty('--escala-zoom', '1');
+        // Contenedor estático para Mapbox (Evita el tambaleo)
+        const customMarkerContainer = document.createElement('div');
+        customMarkerContainer.className = 'marcador-container';
+
+        // Elemento visual interno que reacciona a las animaciones
+        const customMarkerImg = document.createElement('div');
+        customMarkerImg.className = 'marcador-img auto-abandonado';
+
+        customMarkerContainer.appendChild(customMarkerImg);
 
         marker = new mapboxgl.Marker({ 
-          element: customMarkerDiv,
-          anchor: 'bottom' // ¡ESTO EVITA QUE SE MUEVA O RESBALE AL ROTAR!
+          element: customMarkerContainer,
+          anchor: 'bottom' 
         })
           .setLngLat([t.longitud, t.latitud])
           .setPopup(popup)
           .addTo(map);
 
-        popup.on('open', () => customMarkerDiv.classList.add('activo'));
-        popup.on('close', () => customMarkerDiv.classList.remove('activo'));
+        popup.on('open', () => customMarkerImg.classList.add('activo'));
+        popup.on('close', () => customMarkerImg.classList.remove('activo'));
 
       } else {
         marker = new mapboxgl.Marker({ color: '#2563eb' })
@@ -221,36 +227,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       markers.push(marker);
     });
 
-    // LÓGICA DE ESCALA DINÁMICA: Ajusta el tamaño de los íconos matemáticamente según el Zoom
-    const revisarZoom = () => {
-      const currentZoom = map.getZoom();
-      
-      // Matemática: El zoom base es 15.5. Cada vez que hacemos zoom, el tamaño se multiplica proporcionalmente.
-      // Math.max(..., 0.35) evita que se hagan invisibles al alejar mucho la cámara.
-      const escala = Math.max(Math.pow(2, currentZoom - 15.5), 0.35);
-
-      const tokensAnimados = document.querySelectorAll('.marcador-25d');
-      tokensAnimados.forEach(token => {
-        const div = token as HTMLElement;
-        // Inyectamos la variable matemática en el CSS del ícono
-        div.style.setProperty('--escala-zoom', escala.toString());
-
-        if (currentZoom >= 16.5) {
-          div.classList.add('zoom-cercano');
-        } else {
-          div.classList.remove('zoom-cercano');
-        }
-      });
-    };
-
-    // Usar evento "zoom" (se dispara 60 veces por segundo al hacer scroll) para que escale fluido
-    map.on('zoom', revisarZoom);
-    revisarZoom(); 
-
-    return () => {
-      markers.forEach((m) => m.remove());
-      map.off('zoom', revisarZoom);
-    };
+    return () => markers.forEach((m) => m.remove());
   }, [tickets, onTicketSelect]);
 
   const alternarVista = () => {
@@ -269,48 +246,42 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
     <div style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
 
       <style>{`
-        .marcador-25d {
-          /* El tamaño final se calcula multiplicando 70px por la variable matemática inyectada desde JS */
-          width: calc(70px * var(--escala-zoom, 1));
-          height: calc(70px * var(--escala-zoom, 1));
-          background-size: contain;
-          background-repeat: no-repeat;
-          
-          /* CLAVE PARA QUE TOQUE EL SUELO EXACTAMENTE */
-          background-position: center bottom; 
-          transform-origin: bottom center; 
-
-          cursor: pointer;
-          
-          /* Se quitó width/height de aquí para que escale con el scroll a 60fps sin retrasos, 
-             dejando solo las animaciones bonitas en la transición */
-          transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), filter 0.3s; 
-          filter: drop-shadow(0px 8px 4px rgba(0,0,0,0.3)); 
+        /* 1. EL CONTENEDOR ESTÁTICO (Aquí Mapbox hace su trabajo sin interferencias CSS) */
+        .marcador-container {
+          width: 65px;
+          height: 65px;
           z-index: 1;
         }
 
-        .marcador-25d.auto-abandonado {
+        /* 2. LA IMAGEN ANIMADA (Solo anima filtros y escala, NO el movimiento del mapa) */
+        .marcador-img {
+          width: 100%;
+          height: 100%;
+          background-size: contain;
+          background-repeat: no-repeat;
+          background-position: center bottom; 
+          transform-origin: bottom center; 
+          cursor: pointer;
+          
+          /* Solo animamos el hover, evitando conflictos con Mapbox */
+          transition: transform 0.2s ease, filter 0.2s ease; 
+          filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.3)); 
+        }
+
+        .marcador-img.auto-abandonado {
           background-image: url('/marcadores/auto-estatico.png');
         }
 
-        /* Ahora usamos porcentajes en TranslateY (-10%) para que la elevación 
-           sea perfecta sin importar si el auto está gigante o enano */
-        .marcador-25d.auto-abandonado:hover {
+        .marcador-img.auto-abandonado:hover {
           background-image: url('/marcadores/ezgif-maker.gif');
-          transform: translateY(-10%) scale(1.1);
-          filter: drop-shadow(0px 16px 8px rgba(0,0,0,0.3));
-          z-index: 10;
+          transform: translateY(-4px) scale(1.1);
+          filter: drop-shadow(0px 8px 6px rgba(0,0,0,0.4));
         }
 
-        .marcador-25d.auto-abandonado.activo {
+        .marcador-img.auto-abandonado.activo {
           background-image: url('/marcadores/ezgif-maker.gif');
-          transform: translateY(-15%) scale(1.2);
-          filter: drop-shadow(0px 20px 10px rgba(0,0,0,0.2)) drop-shadow(0 0 12px rgba(56, 189, 248, 0.8));
-          z-index: 20;
-        }
-
-        .marcador-25d.auto-abandonado.zoom-cercano {
-          background-image: url('/marcadores/ezgif-maker.gif');
+          transform: translateY(-8px) scale(1.15);
+          filter: drop-shadow(0px 10px 8px rgba(0,0,0,0.4)) drop-shadow(0 0 10px rgba(56, 189, 248, 0.8));
         }
       `}</style>
 
