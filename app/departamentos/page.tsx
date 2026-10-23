@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { useSession, signOut } from 'next-auth/react';
 import { 
   FiMap, FiTarget, FiUserCheck, FiArrowLeft, FiLogOut, 
-  FiAlertCircle, FiClock, FiMapPin, FiTruck, FiCheckCircle 
+  FiAlertCircle, FiClock, FiMapPin, FiTruck, FiCheckCircle, FiBell, FiX 
 } from 'react-icons/fi';
 
 const MapComponent = dynamic(() => import('@/components/Map'), { 
@@ -19,6 +19,13 @@ const MapComponent = dynamic(() => import('@/components/Map'), {
 
 const API_URL = process.env.NEXT_PUBLIC_API_GATEWAY_URL || 'https://nn4p1ybmu2.execute-api.us-east-2.amazonaws.com';
 
+interface HistorialItem {
+  id: string;
+  comentario: string;
+  createdAt: string;
+  estadoNuevo: string;
+}
+
 interface Ticket {
   id: string;
   codigoTicket: string;
@@ -30,6 +37,7 @@ interface Ticket {
   categoria?: { nombre: string };
   prioridadIA: string;
   operadorAsignadoId?: string | null;
+  historial?: HistorialItem[];
 }
 
 interface Funcionario {
@@ -51,8 +59,10 @@ export default function DepartamentoDashboard() {
   const [ticketSeleccionado, setTicketSeleccionado] = useState<Ticket | null>(null);
   const [modoDespacho, setModoDespacho] = useState<boolean>(false);
   const [procesandoAsignacion, setProcesandoAsignacion] = useState<boolean>(false);
+  
+  // Estado para el panel de notificaciones
+  const [mostrarNotificaciones, setMostrarNotificaciones] = useState<boolean>(false);
 
-  // Mapeo automático de departamento según el correo de la sesión
   const infoDepartamento = useMemo(() => {
     const email = session?.user?.email || '';
     const prefix = email.split('@')[0].toLowerCase();
@@ -70,14 +80,12 @@ export default function DepartamentoDashboard() {
     if (infoDepartamento.id === 0) return;
     setCargando(true);
     try {
-      // 1. Cargar tickets del departamento
       const resTickets = await fetch(`${API_URL}/tickets?departamentoId=${infoDepartamento.id}`);
       if (resTickets.ok) {
         const dataTickets = await resTickets.json();
         setTickets(dataTickets.filter((t: Ticket) => t.estado !== 'RESUELTO' && t.estado !== 'DESCARTADO'));
       }
 
-      // 2. Cargar TODOS los funcionarios en terreno de este departamento (con o sin GPS activo para el listado)
       const resFuncionarios = await fetch(`${API_URL}/operadores?departamentoId=${infoDepartamento.id}&rol=TERRENO`);
       if (resFuncionarios.ok) {
         const dataFuncionarios = await resFuncionarios.json();
@@ -93,8 +101,29 @@ export default function DepartamentoDashboard() {
   useEffect(() => {
     if (session?.user) {
       cargarDatos();
+      // Auto-refrescar cada 15 segundos para mantener las notificaciones y el GPS sincronizados
+      const interval = setInterval(cargarDatos, 15000);
+      return () => clearInterval(interval);
     }
   }, [session, infoDepartamento.id]);
+
+  // Extraer notificaciones de rechazo desde el historial de los tickets
+  const notificacionesRechazo = useMemo(() => {
+    const alertas: { id: string; ticketCodigo: string; mensaje: string; fecha: string }[] = [];
+    tickets.forEach(ticket => {
+      ticket.historial?.forEach(h => {
+        if (h.comentario && h.comentario.includes('Rechazado por funcionario')) {
+          alertas.push({
+            id: h.id,
+            ticketCodigo: ticket.codigoTicket,
+            mensaje: h.comentario,
+            fecha: h.createdAt
+          });
+        }
+      });
+    });
+    return alertas.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+  }, [tickets]);
 
   const abrirTicket = (ticket: Ticket) => {
     setTicketSeleccionado(ticket);
@@ -174,14 +203,32 @@ export default function DepartamentoDashboard() {
                 <FiTarget /> {infoDepartamento.nombre}
               </h1>
             </div>
-            <button 
-              onClick={() => signOut({ callbackUrl: '/' })} 
-              style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', cursor: 'pointer', padding: '8px', borderRadius: '8px', backdropFilter: 'blur(4px)' }} 
-              title="Cerrar Sesión"
-            >
-              <FiLogOut size={16} />
-            </button>
+            
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              {/* BOTÓN DE NOTIFICACIONES */}
+              <button 
+                onClick={() => setMostrarNotificaciones(!mostrarNotificaciones)}
+                style={{ position: 'relative', background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', cursor: 'pointer', padding: '8px', borderRadius: '8px', backdropFilter: 'blur(4px)' }}
+                title="Notificaciones de rechazo"
+              >
+                <FiBell size={16} />
+                {notificacionesRechazo.length > 0 && (
+                  <span style={{ position: 'absolute', top: -4, right: -4, backgroundColor: '#ef4444', color: 'white', fontSize: '9px', fontWeight: 900, width: '16px', height: '16px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {notificacionesRechazo.length}
+                  </span>
+                )}
+              </button>
+
+              <button 
+                onClick={() => signOut({ callbackUrl: '/' })} 
+                style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', cursor: 'pointer', padding: '8px', borderRadius: '8px', backdropFilter: 'blur(4px)' }} 
+                title="Cerrar Sesión"
+              >
+                <FiLogOut size={16} />
+              </button>
+            </div>
           </div>
+
           <div style={{ marginTop: '16px', display: 'flex', gap: '12px', fontSize: '12px', fontWeight: 600 }}>
             <div style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: '6px 12px', borderRadius: '999px' }}>
               {tickets.length} Casos Activos
@@ -192,6 +239,28 @@ export default function DepartamentoDashboard() {
             </div>
           </div>
         </div>
+
+        {/* PANEL DESPLEGABLE DE NOTIFICACIONES */}
+        {mostrarNotificaciones && (
+          <div style={{ backgroundColor: '#1e293b', color: 'white', padding: '16px', borderBottom: '1px solid #334155', maxHeight: '220px', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px', color: '#cbd5e1' }}>Alertas de Rechazo Operativo</span>
+              <button onClick={() => setMostrarNotificaciones(false)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' }}><FiX size={16} /></button>
+            </div>
+            {notificacionesRechazo.length === 0 ? (
+              <p style={{ fontSize: '11px', color: '#94a3b8', margin: 0 }}>No hay rechazos recientes de unidades.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {notificacionesRechazo.map((notif) => (
+                  <div key={notif.id} style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '10px', borderRadius: '8px', fontSize: '11px' }}>
+                    <div style={{ fontWeight: 900, color: '#fca5a5', marginBottom: '2px' }}>Ticket: {notif.ticketCodigo}</div>
+                    <div style={{ color: '#f1f5f9' }}>{notif.mensaje}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f8fafc' }}>
           {cargando ? (
@@ -294,6 +363,11 @@ export default function DepartamentoDashboard() {
                             
                             const esAsignado = ticketSeleccionado.operadorAsignadoId === func.id;
 
+                            // Verificar si este funcionario rechazó este ticket en el historial
+                            const rechazoHistorial = ticketSeleccionado.historial?.find(h => 
+                              h.comentario?.includes('Rechazado por funcionario') && h.comentario.includes(func.nombre)
+                            );
+
                             return (
                               <div key={func.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', backgroundColor: esAsignado ? '#ecfdf5' : '#f8fafc', border: esAsignado ? '1px solid #10b981' : '1px solid #e2e8f0', borderRadius: '12px' }}>
                                 <div>
@@ -303,10 +377,19 @@ export default function DepartamentoDashboard() {
                                       {func.gpsActivo ? 'GPS ON' : 'GPS OFF'}
                                     </span>
                                   </div>
-                                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#64748b', marginTop: '4px', fontWeight: 600 }}>
-                                    <FiClock size={10} /> a {dist} km aprox.
-                                  </span>
+
+                                  {/* ETIQUETA SI RECHAZÓ ESTE TICKET */}
+                                  {rechazoHistorial ? (
+                                    <span style={{ display: 'block', fontSize: '10px', color: '#dc2626', fontWeight: 800, marginTop: '2px' }}>
+                                      ⚠️ Rechazado: {rechazoHistorial.comentario.split(':')[1] || 'Motivo no especificado'}
+                                    </span>
+                                  ) : (
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#64748b', marginTop: '4px', fontWeight: 600 }}>
+                                      <FiClock size={10} /> a {dist} km aprox.
+                                    </span>
+                                  )}
                                 </div>
+
                                 <button 
                                   onClick={() => asignarFuncionario(func.id)}
                                   disabled={procesandoAsignacion || esAsignado}
@@ -315,7 +398,7 @@ export default function DepartamentoDashboard() {
                                   {esAsignado ? (
                                     <><FiCheckCircle /> ASIGNADO</>
                                   ) : (
-                                    <><FiUserCheck /> ASIGNAR</>
+                                    <><FiUserCheck /> {rechazoHistorial ? 'REASIGNAR' : 'ASIGNAR'}</>
                                   )}
                                 </button>
                               </div>
@@ -350,7 +433,7 @@ export default function DepartamentoDashboard() {
 
         <MapComponent 
           tickets={ticketsEnMapa} 
-          fantasmas={funcionarios} // El componente Map filtra internamente solo los que tienen gpsActivo === true
+          fantasmas={funcionarios} 
           coordenadaSeleccionada={ticketSeleccionado && modoDespacho ? [ticketSeleccionado.latitud!, ticketSeleccionado.longitud!] : null} 
           onTicketSelect={(id) => {
             const t = tickets.find(x => x.id === id);
