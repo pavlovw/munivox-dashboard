@@ -3,6 +3,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
+import styles from './Map.module.css';
 
 import buinBoundary from '../data/buin-boundary.json';
 
@@ -147,11 +148,11 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
     return () => map.remove();
   }, []);
 
-  // Efecto para centrar el mapa SOLO cuando cambia la coordenada real, no en cada refresco
+  // Efecto para centrar el mapa cuando cambia la coordenada seleccionada
   useEffect(() => {
     if (mapRef.current && coordenadaSeleccionada && coordenadaSeleccionada[0] && coordenadaSeleccionada[1]) {
       mapRef.current.flyTo({
-        center: [coordenadaSeleccionada[1], coordenadaSeleccionada[0]], // Mapbox usa [longitud, latitud]
+        center: [coordenadaSeleccionada[1], coordenadaSeleccionada[0]],
         zoom: 16,
         essential: true,
         duration: 1500
@@ -193,8 +194,8 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       popupNode.style.fontFamily = 'sans-serif';
       popupNode.style.minWidth = '140px';
       popupNode.innerHTML = `
-        <span style="font-size: 10px; font-weight: 900; color: #0284c7;">${t.codigoTicket}</span>
-        <p style="font-size: 12px; font-weight: bold; margin: 4px 0;">${t.categoria?.nombre || 'Incidencia'}</p>
+        <span style="font-size: 10px; font-weight: 900; color: #0284c7;">${t.codigoTicket || ''}</span>
+        <p style="font-size: 12px; font-weight: bold; margin: 4px 0;">${typeof t.categoria === 'string' ? t.categoria : t.categoria?.nombre || 'Incidencia'}</p>
         <button id="btn-ticket-${t.id}" style="width: 100%; background-color: #2563eb; color: white; border: none; padding: 6px; border-radius: 6px; font-weight: bold; font-size: 11px; cursor: pointer;">
           Ver Expediente
         </button>
@@ -202,27 +203,35 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       popupNode.querySelector(`#btn-ticket-${t.id}`)?.addEventListener('click', () => onTicketSelect(t.id));
       const popup = new mapboxgl.Popup({ offset: 25 }).setDOMContent(popupNode);
 
-      const catId = t.categoria?.id;
-      // Convertimos a minúsculas y quitamos tildes para que la coincidencia sea perfecta
-      const catName = (t.categoria?.nombre || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      let claseMarcador = '';
+      // Obtener el nombre de la categoría soportando String u Objeto
+      const rawCategoria = typeof t.categoria === 'string' 
+        ? t.categoria 
+        : (t.categoria?.nombre || t.categoriaNombre || '');
 
-      if (catName.includes('vehiculo') || catName.includes('auto')) claseMarcador = 'auto-abandonado';
-      else if (catName.includes('basura') || catName.includes('escombro') || catName.includes('microbasural')) claseMarcador = 'basura';
-      else if (catName.includes('alumbrado') || catName.includes('luz')) claseMarcador = 'alumbrado';
-      else if (catName.includes('ruido') || catName.includes('fiesta')) claseMarcador = 'ruidos';
-      else if (catName.includes('bache') || catName.includes('hoyo') || catName.includes('vial')) claseMarcador = 'bache';
-      else if (catName.includes('animal') || catName.includes('perro')) claseMarcador = 'animales';
-      else if (catName.includes('senal') || catName.includes('transito')) claseMarcador = 'senaletica';
-      else if (catName.includes('verde') || catName.includes('riego') || catName.includes('arbol')) claseMarcador = 'plaza';
+      const catName = rawCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      
+      let claseMarcadorEstilo = '';
+
+      if (catName.includes('vehiculo') || catName.includes('auto') || catName.includes('abandonado')) {
+        claseMarcadorEstilo = styles.autoAbandonado;
+      } else if (catName.includes('basura') || catName.includes('escombro') || catName.includes('microbasural')) {
+        claseMarcadorEstilo = styles.basura;
+      } else if (catName.includes('alumbrado') || catName.includes('luz') || catName.includes('luminaria')) {
+        claseMarcadorEstilo = styles.alumbrado;
+      } else if (catName.includes('ruido') || catName.includes('fiesta') || catName.includes('molesto')) {
+        claseMarcadorEstilo = styles.ruidos;
+      } else if (catName.includes('bache') || catName.includes('hoyo') || catName.includes('vial') || catName.includes('pavimento')) {
+        claseMarcadorEstilo = styles.bache;
+      }
 
       let marker: mapboxgl.Marker;
 
-      if (claseMarcador) {
+      if (claseMarcadorEstilo) {
         const customMarkerContainer = document.createElement('div');
-        customMarkerContainer.className = 'marcador-container';
+        customMarkerContainer.className = styles.marcadorContainer;
+
         const customMarkerImg = document.createElement('div');
-        customMarkerImg.className = `marcador-img ${claseMarcador}`;
+        customMarkerImg.className = `${styles.marcadorImg} ${claseMarcadorEstilo}`;
         customMarkerContainer.appendChild(customMarkerImg);
 
         marker = new mapboxgl.Marker({ element: customMarkerContainer, anchor: 'bottom' })
@@ -230,13 +239,17 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
           .setPopup(popup)
           .addTo(map);
 
-        popup.on('open', () => customMarkerImg.classList.add('activo'));
-        popup.on('close', () => customMarkerImg.classList.remove('activo'));
+        popup.on('open', () => customMarkerImg.classList.add(styles.activo));
+        popup.on('close', () => customMarkerImg.classList.remove(styles.activo));
       } else {
-        marker = new mapboxgl.Marker({ color: '#2563eb' }).setLngLat([t.longitud, t.latitud]).setPopup(popup).addTo(map);
+        marker = new mapboxgl.Marker({ color: '#2563eb' })
+          .setLngLat([t.longitud, t.latitud])
+          .setPopup(popup)
+          .addTo(map);
       }
       markers.push(marker);
     });
+
     return () => markers.forEach((m) => m.remove());
   }, [tickets, onTicketSelect]);
 
@@ -267,7 +280,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       el.innerHTML = '🚐';
       
       if (isOnline) {
-        el.style.animation = 'pulse 2s infinite';
+        el.style.animation = `${styles.pulse || 'pulse'} 2s infinite`;
       }
 
       const fechaUltima = f.ultimaUbicacion ? new Date(f.ultimaUbicacion).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Desconocida';
@@ -307,77 +320,6 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-
-      <style>{`
-        /* TAMAÑO OPTIMIZADO: 45px para no invadir las calles */
-        .marcador-container { width: 45px; height: 45px; z-index: 1; }
-        
-        .marcador-img { 
-          width: 100%; height: 100%; background-size: contain; background-repeat: no-repeat; 
-          background-position: center bottom; transform-origin: bottom center; cursor: pointer; 
-          transition: transform 0.2s ease, filter 0.2s ease; filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.3)); 
-        }
-        
-        /* HOVER: Crece solo un poquito y se eleva sutilmente */
-        .marcador-img:hover { 
-          transform: translateY(-4px) scale(1.15); 
-          filter: drop-shadow(0px 6px 4px rgba(0,0,0,0.4)); 
-        }
-        
-        /* ACTIVO (CLIC): Se mantiene en su tamaño base pero con brillo */
-        .marcador-img.activo { 
-          transform: translateY(0px) scale(1.05); 
-          filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.3)) drop-shadow(0 0 10px rgba(56, 189, 248, 0.9)); 
-        }
-
-        /* 1. AUTO ABANDONADO */
-        .marcador-img.auto-abandonado { background-image: url('/marcadores/auto-estatico.png'); }
-        .marcador-img.auto-abandonado:hover, .marcador-img.auto-abandonado.activo { background-image: url('/marcadores/auto.gif'); }
-        
-        /* 2. BASURA / ESCOMBROS */
-        .marcador-img.basura { background-image: url('/marcadores/basura-estatica.png'); }
-        .marcador-img.basura:hover, .marcador-img.basura.activo { background-image: url('/marcadores/basura.gif'); }
-
-        /* 3. ALUMBRADO */
-        .marcador-img.alumbrado { background-image: url('/marcadores/alumbrado-estatico.png'); }
-        .marcador-img.alumbrado:hover, .marcador-img.alumbrado.activo { background-image: url('/marcadores/alumbrado.gif'); }
-
-        /* 4. RUIDOS */
-        .marcador-img.ruidos { background-image: url('/marcadores/ruidos-estatico.png'); }
-        .marcador-img.ruidos:hover, .marcador-img.ruidos.activo { background-image: url('/marcadores/ruidos.gif'); }
-
-        /* 5. BACHE / DAÑO VIAL */
-        .marcador-img.bache { background-image: url('/marcadores/bache-estatico.png'); }
-        .marcador-img.bache:hover, .marcador-img.bache.activo { background-image: url('/marcadores/bache.gif'); }
-
-        /* ========================================= */
-        /* ICONOS EN RESERVA (Aún sin diseño final)  */
-        /* ========================================= */
-        
-        /* 6. ANIMALES SUELTOS */
-        /*
-        .marcador-img.animales { background-image: url('/marcadores/animal-estatico.png'); }
-        .marcador-img.animales:hover, .marcador-img.animales.activo { background-image: url('/marcadores/animal.gif'); }
-        */
-
-        /* 7. SEÑALÉTICA */
-        /*
-        .marcador-img.senaletica { background-image: url('/marcadores/senalitica-estatico.png'); }
-        .marcador-img.senaletica:hover, .marcador-img.senaletica.activo { background-image: url('/marcadores/senalitica.gif'); }
-        */
-
-        /* 8. ÁREAS VERDES / PLAZAS */
-        /*
-        .marcador-img.plaza { background-image: url('/marcadores/plaza-estatico.png'); }
-        .marcador-img.plaza:hover, .marcador-img.plaza.activo { background-image: url('/marcadores/plaza.gif'); }
-        */
-
-        @keyframes pulse {
-          0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-          70% { box-shadow: 0 0 0 15px rgba(16, 185, 129, 0); }
-          100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
-        }
-      `}</style>
 
       {/* MENÚ DESPLEGABLE SUPERIOR */}
       <div style={{ position: 'absolute', top: '16px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '8px 12px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', gap: '8px' }}>
