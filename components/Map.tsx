@@ -68,7 +68,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
 
   const uvActual = UNIDADES_VECINALES.find(uv => uv.id === uvSeleccionadaId);
 
-  // Inicialización del Mapa
+  // Inicialización del Mapa Base
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
@@ -147,7 +147,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
     return () => map.remove();
   }, []);
 
-  // Efecto para centrar el mapa cuando cambia la coordenada seleccionada
+  // Volar a coordenada seleccionada
   useEffect(() => {
     if (mapRef.current && coordenadaSeleccionada && coordenadaSeleccionada[0] && coordenadaSeleccionada[1]) {
       mapRef.current.flyTo({
@@ -159,7 +159,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
     }
   }, [coordenadaSeleccionada?.[0], coordenadaSeleccionada?.[1]]);
 
-  // Efectos de UVs
+  // Capas de Unidades Vecinales
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
@@ -179,7 +179,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
   }, [mostrarBordesUV]);
 
   // ==========================================
-  // RENDERIZAR TICKETS
+  // RENDERIZADO DE MARCADORES (TICKETS)
   // ==========================================
   useEffect(() => {
     const map = mapRef.current;
@@ -192,35 +192,37 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       const popupNode = document.createElement('div');
       popupNode.style.fontFamily = 'sans-serif';
       popupNode.style.minWidth = '140px';
+      
+      const nombreCategoria = typeof t.categoria === 'string' 
+        ? t.categoria 
+        : (t.categoria?.nombre || t.categoriaNombre || 'Incidencia');
+
       popupNode.innerHTML = `
         <span style="font-size: 10px; font-weight: 900; color: #0284c7;">${t.codigoTicket || ''}</span>
-        <p style="font-size: 12px; font-weight: bold; margin: 4px 0;">${typeof t.categoria === 'string' ? t.categoria : t.categoria?.nombre || 'Incidencia'}</p>
+        <p style="font-size: 12px; font-weight: bold; margin: 4px 0;">${nombreCategoria}</p>
         <button id="btn-ticket-${t.id}" style="width: 100%; background-color: #2563eb; color: white; border: none; padding: 6px; border-radius: 6px; font-weight: bold; font-size: 11px; cursor: pointer;">
           Ver Expediente
         </button>
       `;
+      
       popupNode.querySelector(`#btn-ticket-${t.id}`)?.addEventListener('click', () => onTicketSelect(t.id));
       const popup = new mapboxgl.Popup({ offset: 25 }).setDOMContent(popupNode);
 
-      // Detección flexible de categoría (ID o Nombre)
+      // Normalización estricta de la categoría
       const catId = t.categoria?.id;
-      const rawCategoria = typeof t.categoria === 'string' 
-        ? t.categoria 
-        : (t.categoria?.nombre || t.categoriaNombre || '');
-
-      const catName = rawCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const catText = nombreCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       
       let claseMarcador = '';
 
-      if (catId === 1 || catName.includes('vehiculo') || catName.includes('auto') || catName.includes('abandonado')) {
+      if (catId === 1 || catText.includes('vehiculo') || catText.includes('auto') || catText.includes('abandonado')) {
         claseMarcador = 'auto-abandonado';
-      } else if (catId === 2 || catName.includes('basura') || catName.includes('escombro') || catName.includes('microbasural')) {
+      } else if (catId === 2 || catText.includes('basura') || catText.includes('escombro') || catText.includes('microbasural')) {
         claseMarcador = 'basura';
-      } else if (catId === 3 || catName.includes('alumbrado') || catName.includes('luz') || catName.includes('luminaria')) {
+      } else if (catId === 3 || catText.includes('alumbrado') || catText.includes('luz') || catText.includes('luminaria')) {
         claseMarcador = 'alumbrado';
-      } else if (catId === 4 || catName.includes('ruido') || catName.includes('fiesta') || catName.includes('molesto')) {
+      } else if (catId === 4 || catText.includes('ruido') || catText.includes('fiesta') || catText.includes('molesto')) {
         claseMarcador = 'ruidos';
-      } else if (catId === 5 || catName.includes('bache') || catName.includes('hoyo') || catName.includes('vial') || catName.includes('pavimento')) {
+      } else if (catId === 5 || catText.includes('bache') || catText.includes('hoyo') || catText.includes('vial') || catText.includes('pavimento')) {
         claseMarcador = 'bache';
       }
 
@@ -235,7 +237,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         customMarkerContainer.appendChild(customMarkerImg);
 
         marker = new mapboxgl.Marker({ element: customMarkerContainer, anchor: 'bottom' })
-          .setLngLat([t.longitud, t.latitud])
+          .setLngLat([Number(t.longitud), Number(t.latitud)])
           .setPopup(popup)
           .addTo(map);
 
@@ -243,7 +245,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         popup.on('close', () => customMarkerImg.classList.remove('activo'));
       } else {
         marker = new mapboxgl.Marker({ color: '#2563eb' })
-          .setLngLat([t.longitud, t.latitud])
+          .setLngLat([Number(t.longitud), Number(t.latitud)])
           .setPopup(popup)
           .addTo(map);
       }
@@ -254,7 +256,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
   }, [tickets, onTicketSelect]);
 
   // ==========================================
-  // RENDERIZAR FUNCIONARIOS (FANTASMAS)
+  // RENDERIZADO DE FUNCIONARIOS (FANTASMAS)
   // ==========================================
   useEffect(() => {
     const map = mapRef.current;
@@ -289,14 +291,14 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         <div style="font-family: sans-serif; text-align: center; min-width: 120px;">
           <strong style="color: ${isOnline ? '#10b981' : '#64748b'}; font-size: 13px;">${f.nombre}</strong><br/>
           <span style="font-size: 11px; font-weight: bold; color: ${isOnline ? '#059669' : '#94a3b8'};">
-            ${isOnline ? '🟢 GPS Activo en vivo' : '⚪ GPS Apagado'}
+            ${isOnline ? '🟢 GPS Activo' : '⚪ GPS Apagado'}
           </span><br/>
           ${!isOnline ? `<span style="font-size: 10px; color: #cbd5e1;">Última pos: ${fechaUltima}</span>` : ''}
         </div>
       `);
 
       const marker = new mapboxgl.Marker({ element: el })
-        .setLngLat([f.longitud, f.latitud])
+        .setLngLat([Number(f.longitud), Number(f.latitud)])
         .setPopup(popup)
         .addTo(map);
 
@@ -321,21 +323,23 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
 
-      {/* ESTILOS GLOBALES DE LOS MARCADORES Y ANIMACIONES */}
+      {/* REGLAS CSS GLOBALES PARA LOS ICONOS */}
       <style>{`
         .marcador-container {
-          width: 50px;
-          height: 50px;
-          position: relative;
-          z-index: 1;
+          width: 50px !important;
+          height: 50px !important;
+          position: relative !important;
+          display: block !important;
+          z-index: 10;
         }
 
         .marcador-img {
-          width: 100%;
-          height: 100%;
-          background-size: contain;
-          background-repeat: no-repeat;
-          background-position: center bottom;
+          width: 100% !important;
+          height: 100% !important;
+          display: block !important;
+          background-size: contain !important;
+          background-repeat: no-repeat !important;
+          background-position: center bottom !important;
           transform-origin: bottom center;
           cursor: pointer;
           transition: transform 0.2s ease, filter 0.2s ease;
@@ -352,32 +356,50 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
           filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.3)) drop-shadow(0 0 10px rgba(56, 189, 248, 0.9));
         }
 
-        /* 1. AUTO ABANDONADO (Soporta ezgif-maker.gif y auto.gif) */
-        .marcador-img.auto-abandonado { background-image: url('/marcadores/auto-estatico.png'); }
+        /* 1. AUTO ABANDONADO */
+        .marcador-img.auto-abandonado { 
+          background-image: url('/marcadores/auto-estatico.png') !important; 
+        }
         .marcador-img.auto-abandonado:hover, 
         .marcador-img.auto-abandonado.activo { 
-          background-image: url('/marcadores/ezgif-maker.gif'), url('/marcadores/auto.gif'); 
+          background-image: url('/marcadores/ezgif-maker.gif') !important, url('/marcadores/auto.gif') !important; 
         }
 
         /* 2. BASURA */
-        .marcador-img.basura { background-image: url('/marcadores/basura-estatica.png'); }
+        .marcador-img.basura { 
+          background-image: url('/marcadores/basura-estatica.png') !important; 
+        }
         .marcador-img.basura:hover, 
-        .marcador-img.basura.activo { background-image: url('/marcadores/basura.gif'); }
+        .marcador-img.basura.activo { 
+          background-image: url('/marcadores/basura.gif') !important; 
+        }
 
         /* 3. ALUMBRADO */
-        .marcador-img.alumbrado { background-image: url('/marcadores/alumbrado-estatico.png'); }
+        .marcador-img.alumbrado { 
+          background-image: url('/marcadores/alumbrado-estatico.png') !important; 
+        }
         .marcador-img.alumbrado:hover, 
-        .marcador-img.alumbrado.activo { background-image: url('/marcadores/alumbrado.gif'); }
+        .marcador-img.alumbrado.activo { 
+          background-image: url('/marcadores/alumbrado.gif') !important; 
+        }
 
         /* 4. RUIDOS */
-        .marcador-img.ruidos { background-image: url('/marcadores/ruidos-estatico.png'); }
+        .marcador-img.ruidos { 
+          background-image: url('/marcadores/ruidos-estatico.png') !important; 
+        }
         .marcador-img.ruidos:hover, 
-        .marcador-img.ruidos.activo { background-image: url('/marcadores/ruidos.gif'); }
+        .marcador-img.ruidos.activo { 
+          background-image: url('/marcadores/ruidos.gif') !important; 
+        }
 
         /* 5. BACHE */
-        .marcador-img.bache { background-image: url('/marcadores/bache-estatico.png'); }
+        .marcador-img.bache { 
+          background-image: url('/marcadores/bache-estatico.png') !important; 
+        }
         .marcador-img.bache:hover, 
-        .marcador-img.bache.activo { background-image: url('/marcadores/bache.gif'); }
+        .marcador-img.bache.activo { 
+          background-image: url('/marcadores/bache.gif') !important; 
+        }
 
         @keyframes pulse {
           0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
