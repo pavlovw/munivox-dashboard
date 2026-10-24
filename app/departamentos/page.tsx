@@ -293,15 +293,22 @@ export default function DepartamentoDashboard() {
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                       <span style={{ fontSize: '13px', fontWeight: 900, color: '#0f172a' }}>{ticket.codigoTicket}</span>
+                      {/* LÓGICA DE ESTADOS EN EL LISTADO DEL DEPARTAMENTO */}
                       {ticket.operadorAsignadoId ? (
+                        ticket.estado === 'DESPACHADO' ? (
                         <span style={{ fontSize: '10px', fontWeight: 800, padding: '4px 8px', borderRadius: '8px', backgroundColor: '#ecfdf5', color: '#059669', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <FiTruck /> EN RUTA
+                            <FiTruck /> MÓVIL EN RUTA
                         </span>
                       ) : (
-                        <span style={{ fontSize: '10px', fontWeight: 800, padding: '4px 8px', borderRadius: '8px', backgroundColor: '#fffbeb', color: '#d97706', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <FiAlertCircle /> ESPERANDO MÓVIL
+                        <span style={{ fontSize: '10px', fontWeight: 800, padding: '4px 8px', borderRadius: '8px', backgroundColor: '#e0e7ff', color: '#4f46e5', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <FiClock /> ESPERANDO CONFIRMACIÓN
                         </span>
-                      )}
+                        )
+                      ) : (
+                        <span style={{ fontSize: '10px', fontWeight: 800, padding: '4px 8px', borderRadius: '8px', backgroundColor: '#fffbeb', color: '#d97706', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <FiAlertCircle /> PENDIENTE ASIGNAR
+                        </span>
+                       )}
                     </div>
                     <h3 style={{ fontSize: '12px', fontWeight: 700, color: '#475569', margin: '0 0 6px 0' }}>
                       {ticket.categoria?.nombre || 'Clasificación Pendiente'}

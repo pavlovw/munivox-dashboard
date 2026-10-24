@@ -203,17 +203,18 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       const popup = new mapboxgl.Popup({ offset: 25 }).setDOMContent(popupNode);
 
       const catId = t.categoria?.id;
-      const catName = t.categoria?.nombre || '';
+      // Convertimos a minúsculas y quitamos tildes para que la coincidencia sea perfecta
+      const catName = (t.categoria?.nombre || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       let claseMarcador = '';
 
-      if (catId === 1 || catName.includes('Vehículo')) claseMarcador = 'auto-abandonado';
-      else if (catId === 2 || catName.includes('basura') || catName.includes('escombros')) claseMarcador = 'basura';
-      else if (catId === 3 || catName.includes('Alumbrado')) claseMarcador = 'alumbrado';
-      else if (catId === 4 || catName.includes('Ruido') || catName.includes('Fiestas')) claseMarcador = 'ruidos';
-      else if (catId === 5 || catName.includes('Bache') || catName.includes('vial')) claseMarcador = 'bache';
-      else if (catId === 6 || catName.includes('Animal')) claseMarcador = 'animales';
-      else if (catId === 7 || catName.includes('Señalética')) claseMarcador = 'senaletica';
-      else if (catId === 8 || catName.includes('verde') || catName.includes('Riego')) claseMarcador = 'plaza';
+      if (catName.includes('vehiculo') || catName.includes('auto')) claseMarcador = 'auto-abandonado';
+      else if (catName.includes('basura') || catName.includes('escombro') || catName.includes('microbasural')) claseMarcador = 'basura';
+      else if (catName.includes('alumbrado') || catName.includes('luz')) claseMarcador = 'alumbrado';
+      else if (catName.includes('ruido') || catName.includes('fiesta')) claseMarcador = 'ruidos';
+      else if (catName.includes('bache') || catName.includes('hoyo') || catName.includes('vial')) claseMarcador = 'bache';
+      else if (catName.includes('animal') || catName.includes('perro')) claseMarcador = 'animales';
+      else if (catName.includes('senal') || catName.includes('transito')) claseMarcador = 'senaletica';
+      else if (catName.includes('verde') || catName.includes('riego') || catName.includes('arbol')) claseMarcador = 'plaza';
 
       let marker: mapboxgl.Marker;
 
