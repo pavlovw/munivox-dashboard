@@ -3,7 +3,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import styles from './Map.module.css';
 
 import buinBoundary from '../data/buin-boundary.json';
 
@@ -203,35 +202,36 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       popupNode.querySelector(`#btn-ticket-${t.id}`)?.addEventListener('click', () => onTicketSelect(t.id));
       const popup = new mapboxgl.Popup({ offset: 25 }).setDOMContent(popupNode);
 
-      // Obtener el nombre de la categoría soportando String u Objeto
+      // Detección flexible de categoría (ID o Nombre)
+      const catId = t.categoria?.id;
       const rawCategoria = typeof t.categoria === 'string' 
         ? t.categoria 
         : (t.categoria?.nombre || t.categoriaNombre || '');
 
       const catName = rawCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       
-      let claseMarcadorEstilo = '';
+      let claseMarcador = '';
 
-      if (catName.includes('vehiculo') || catName.includes('auto') || catName.includes('abandonado')) {
-        claseMarcadorEstilo = styles.autoAbandonado;
-      } else if (catName.includes('basura') || catName.includes('escombro') || catName.includes('microbasural')) {
-        claseMarcadorEstilo = styles.basura;
-      } else if (catName.includes('alumbrado') || catName.includes('luz') || catName.includes('luminaria')) {
-        claseMarcadorEstilo = styles.alumbrado;
-      } else if (catName.includes('ruido') || catName.includes('fiesta') || catName.includes('molesto')) {
-        claseMarcadorEstilo = styles.ruidos;
-      } else if (catName.includes('bache') || catName.includes('hoyo') || catName.includes('vial') || catName.includes('pavimento')) {
-        claseMarcadorEstilo = styles.bache;
+      if (catId === 1 || catName.includes('vehiculo') || catName.includes('auto') || catName.includes('abandonado')) {
+        claseMarcador = 'auto-abandonado';
+      } else if (catId === 2 || catName.includes('basura') || catName.includes('escombro') || catName.includes('microbasural')) {
+        claseMarcador = 'basura';
+      } else if (catId === 3 || catName.includes('alumbrado') || catName.includes('luz') || catName.includes('luminaria')) {
+        claseMarcador = 'alumbrado';
+      } else if (catId === 4 || catName.includes('ruido') || catName.includes('fiesta') || catName.includes('molesto')) {
+        claseMarcador = 'ruidos';
+      } else if (catId === 5 || catName.includes('bache') || catName.includes('hoyo') || catName.includes('vial') || catName.includes('pavimento')) {
+        claseMarcador = 'bache';
       }
 
       let marker: mapboxgl.Marker;
 
-      if (claseMarcadorEstilo) {
+      if (claseMarcador) {
         const customMarkerContainer = document.createElement('div');
-        customMarkerContainer.className = styles.marcadorContainer;
+        customMarkerContainer.className = 'marcador-container';
 
         const customMarkerImg = document.createElement('div');
-        customMarkerImg.className = `${styles.marcadorImg} ${claseMarcadorEstilo}`;
+        customMarkerImg.className = `marcador-img ${claseMarcador}`;
         customMarkerContainer.appendChild(customMarkerImg);
 
         marker = new mapboxgl.Marker({ element: customMarkerContainer, anchor: 'bottom' })
@@ -239,8 +239,8 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
           .setPopup(popup)
           .addTo(map);
 
-        popup.on('open', () => customMarkerImg.classList.add(styles.activo));
-        popup.on('close', () => customMarkerImg.classList.remove(styles.activo));
+        popup.on('open', () => customMarkerImg.classList.add('activo'));
+        popup.on('close', () => customMarkerImg.classList.remove('activo'));
       } else {
         marker = new mapboxgl.Marker({ color: '#2563eb' })
           .setLngLat([t.longitud, t.latitud])
@@ -280,7 +280,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       el.innerHTML = '🚐';
       
       if (isOnline) {
-        el.style.animation = `${styles.pulse || 'pulse'} 2s infinite`;
+        el.style.animation = 'pulse 2s infinite';
       }
 
       const fechaUltima = f.ultimaUbicacion ? new Date(f.ultimaUbicacion).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Desconocida';
@@ -320,6 +320,71 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+
+      {/* ESTILOS GLOBALES DE LOS MARCADORES Y ANIMACIONES */}
+      <style>{`
+        .marcador-container {
+          width: 50px;
+          height: 50px;
+          position: relative;
+          z-index: 1;
+        }
+
+        .marcador-img {
+          width: 100%;
+          height: 100%;
+          background-size: contain;
+          background-repeat: no-repeat;
+          background-position: center bottom;
+          transform-origin: bottom center;
+          cursor: pointer;
+          transition: transform 0.2s ease, filter 0.2s ease;
+          filter: drop-shadow(0px 3px 4px rgba(0,0,0,0.3));
+        }
+
+        .marcador-img:hover {
+          transform: translateY(-3px) scale(1.1);
+          filter: drop-shadow(0px 6px 5px rgba(0,0,0,0.4));
+        }
+
+        .marcador-img.activo {
+          transform: translateY(0px) scale(1.05);
+          filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.3)) drop-shadow(0 0 10px rgba(56, 189, 248, 0.9));
+        }
+
+        /* 1. AUTO ABANDONADO (Soporta ezgif-maker.gif y auto.gif) */
+        .marcador-img.auto-abandonado { background-image: url('/marcadores/auto-estatico.png'); }
+        .marcador-img.auto-abandonado:hover, 
+        .marcador-img.auto-abandonado.activo { 
+          background-image: url('/marcadores/ezgif-maker.gif'), url('/marcadores/auto.gif'); 
+        }
+
+        /* 2. BASURA */
+        .marcador-img.basura { background-image: url('/marcadores/basura-estatica.png'); }
+        .marcador-img.basura:hover, 
+        .marcador-img.basura.activo { background-image: url('/marcadores/basura.gif'); }
+
+        /* 3. ALUMBRADO */
+        .marcador-img.alumbrado { background-image: url('/marcadores/alumbrado-estatico.png'); }
+        .marcador-img.alumbrado:hover, 
+        .marcador-img.alumbrado.activo { background-image: url('/marcadores/alumbrado.gif'); }
+
+        /* 4. RUIDOS */
+        .marcador-img.ruidos { background-image: url('/marcadores/ruidos-estatico.png'); }
+        .marcador-img.ruidos:hover, 
+        .marcador-img.ruidos.activo { background-image: url('/marcadores/ruidos.gif'); }
+
+        /* 5. BACHE */
+        .marcador-img.bache { background-image: url('/marcadores/bache-estatico.png'); }
+        .marcador-img.bache:hover, 
+        .marcador-img.bache.activo { background-image: url('/marcadores/bache.gif'); }
+
+        @keyframes pulse {
+          0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+          70% { box-shadow: 0 0 0 15px rgba(16, 185, 129, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+      `}</style>
 
       {/* MENÚ DESPLEGABLE SUPERIOR */}
       <div style={{ position: 'absolute', top: '16px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '8px 12px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', gap: '8px' }}>
