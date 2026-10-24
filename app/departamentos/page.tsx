@@ -152,7 +152,7 @@ export default function DepartamentoDashboard() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          nuevoEstado: 'DESPACHADO',
+          nuevoEstado: 'EN_REVISION',
           operadorAsignadoId: funcionarioId 
         })
       });

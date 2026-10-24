@@ -53,8 +53,8 @@ const UNIDADES_VECINALES = [
 
 interface MapProps {
   tickets: any[];
-  fantasmas?: any[]; // Funcionarios en terreno
-  coordenadaSeleccionada?: [number, number] | null; // [lat, lng]
+  fantasmas?: any[]; 
+  coordenadaSeleccionada?: [number, number] | null; 
   onTicketSelect: (id: string) => void;
 }
 
@@ -147,7 +147,6 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
     return () => map.remove();
   }, []);
 
-  // Efecto para centrar el mapa cuando se selecciona un ticket
   // Efecto para centrar el mapa SOLO cuando cambia la coordenada real, no en cada refresco
   useEffect(() => {
     if (mapRef.current && coordenadaSeleccionada && coordenadaSeleccionada[0] && coordenadaSeleccionada[1]) {
@@ -158,7 +157,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         duration: 1500
       });
     }
-  }, [coordenadaSeleccionada?.[0], coordenadaSeleccionada?.[1]]); // 👈 ESTA LÍNEA ES LA CLAVE
+  }, [coordenadaSeleccionada?.[0], coordenadaSeleccionada?.[1]]);
 
   // Efectos de UVs
   useEffect(() => {
@@ -214,7 +213,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       else if (catId === 5 || catName.includes('Bache') || catName.includes('vial')) claseMarcador = 'bache';
       else if (catId === 6 || catName.includes('Animal')) claseMarcador = 'animales';
       else if (catId === 7 || catName.includes('Señalética')) claseMarcador = 'senaletica';
-      else if (catId === 8 || catName.includes('verde') || catName.includes('Riego')) claseMarcador = 'riego';
+      else if (catId === 8 || catName.includes('verde') || catName.includes('Riego')) claseMarcador = 'plaza';
 
       let marker: mapboxgl.Marker;
 
@@ -249,13 +248,12 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
     const fantasmasMarkers: mapboxgl.Marker[] = [];
 
     fantasmas.forEach((f) => {
-      if (!f.latitud || !f.longitud) return; // Omitir si nunca han registrado posición
+      if (!f.latitud || !f.longitud) return;
 
       const isOnline = f.gpsActivo;
       const el = document.createElement('div');
       
-      // Estilos del marcador de vehículo
-      el.style.backgroundColor = isOnline ? '#10b981' : '#94a3b8'; // Verde si está activo, Gris si está apagado
+      el.style.backgroundColor = isOnline ? '#10b981' : '#94a3b8';
       el.style.width = '30px';
       el.style.height = '30px';
       el.style.borderRadius = '50%';
@@ -265,14 +263,12 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       el.style.alignItems = 'center';
       el.style.justifyContent = 'center';
       el.style.fontSize = '14px';
-      el.innerHTML = '🚐'; // Ícono de furgón/unidad móvil
+      el.innerHTML = '🚐';
       
-      // Animación de pulso si está online
       if (isOnline) {
         el.style.animation = 'pulse 2s infinite';
       }
 
-      // Última hora de conexión
       const fechaUltima = f.ultimaUbicacion ? new Date(f.ultimaUbicacion).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Desconocida';
 
       const popup = new mapboxgl.Popup({ offset: 20 }).setHTML(`
@@ -286,7 +282,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       `);
 
       const marker = new mapboxgl.Marker({ element: el })
-        .setLngLat([f.longitud, f.latitud]) // Mapbox usa [lng, lat]
+        .setLngLat([f.longitud, f.latitud])
         .setPopup(popup)
         .addTo(map);
 
@@ -294,7 +290,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
     });
 
     return () => fantasmasMarkers.forEach(m => m.remove());
-  }, [fantasmas]); // Se ejecutará cada vez que lleguen nuevos datos del frontend (cada 15s o al abrir modo despacho)
+  }, [fantasmas]);
 
   const alternarVista = () => {
     const map = mapRef.current;
@@ -312,16 +308,68 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
     <div style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
 
       <style>{`
-        /* Tus estilos anteriores se mantienen intactos */
-        .marcador-container { width: 65px; height: 65px; z-index: 1; }
-        .marcador-img { width: 100%; height: 100%; background-size: contain; background-repeat: no-repeat; background-position: center bottom; transform-origin: bottom center; cursor: pointer; transition: transform 0.2s ease, filter 0.2s ease; filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.3)); }
-        .marcador-img:hover { transform: translateY(-2px) scale(1.02); filter: drop-shadow(0px 6px 4px rgba(0,0,0,0.4)); }
-        .marcador-img.activo { transform: translateY(0px) scale(1); filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.3)) drop-shadow(0 0 12px rgba(56, 189, 248, 0.9)); }
+        /* TAMAÑO OPTIMIZADO: 45px para no invadir las calles */
+        .marcador-container { width: 45px; height: 45px; z-index: 1; }
+        
+        .marcador-img { 
+          width: 100%; height: 100%; background-size: contain; background-repeat: no-repeat; 
+          background-position: center bottom; transform-origin: bottom center; cursor: pointer; 
+          transition: transform 0.2s ease, filter 0.2s ease; filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.3)); 
+        }
+        
+        /* HOVER: Crece solo un poquito y se eleva sutilmente */
+        .marcador-img:hover { 
+          transform: translateY(-4px) scale(1.15); 
+          filter: drop-shadow(0px 6px 4px rgba(0,0,0,0.4)); 
+        }
+        
+        /* ACTIVO (CLIC): Se mantiene en su tamaño base pero con brillo */
+        .marcador-img.activo { 
+          transform: translateY(0px) scale(1.05); 
+          filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.3)) drop-shadow(0 0 10px rgba(56, 189, 248, 0.9)); 
+        }
 
+        /* 1. AUTO ABANDONADO */
         .marcador-img.auto-abandonado { background-image: url('/marcadores/auto-estatico.png'); }
-        .marcador-img.auto-abandonado:hover, .marcador-img.auto-abandonado.activo { background-image: url('/marcadores/ezgif-maker.gif'); }
+        .marcador-img.auto-abandonado:hover, .marcador-img.auto-abandonado.activo { background-image: url('/marcadores/auto.gif'); }
+        
+        /* 2. BASURA / ESCOMBROS */
         .marcador-img.basura { background-image: url('/marcadores/basura-estatica.png'); }
         .marcador-img.basura:hover, .marcador-img.basura.activo { background-image: url('/marcadores/basura.gif'); }
+
+        /* 3. ALUMBRADO */
+        .marcador-img.alumbrado { background-image: url('/marcadores/alumbrado-estatico.png'); }
+        .marcador-img.alumbrado:hover, .marcador-img.alumbrado.activo { background-image: url('/marcadores/alumbrado.gif'); }
+
+        /* 4. RUIDOS */
+        .marcador-img.ruidos { background-image: url('/marcadores/ruidos-estatico.png'); }
+        .marcador-img.ruidos:hover, .marcador-img.ruidos.activo { background-image: url('/marcadores/ruidos.gif'); }
+
+        /* 5. BACHE / DAÑO VIAL */
+        .marcador-img.bache { background-image: url('/marcadores/bache-estatico.png'); }
+        .marcador-img.bache:hover, .marcador-img.bache.activo { background-image: url('/marcadores/bache.gif'); }
+
+        /* ========================================= */
+        /* ICONOS EN RESERVA (Aún sin diseño final)  */
+        /* ========================================= */
+        
+        /* 6. ANIMALES SUELTOS */
+        /*
+        .marcador-img.animales { background-image: url('/marcadores/animal-estatico.png'); }
+        .marcador-img.animales:hover, .marcador-img.animales.activo { background-image: url('/marcadores/animal.gif'); }
+        */
+
+        /* 7. SEÑALÉTICA */
+        /*
+        .marcador-img.senaletica { background-image: url('/marcadores/senalitica-estatico.png'); }
+        .marcador-img.senaletica:hover, .marcador-img.senaletica.activo { background-image: url('/marcadores/senalitica.gif'); }
+        */
+
+        /* 8. ÁREAS VERDES / PLAZAS */
+        /*
+        .marcador-img.plaza { background-image: url('/marcadores/plaza-estatico.png'); }
+        .marcador-img.plaza:hover, .marcador-img.plaza.activo { background-image: url('/marcadores/plaza.gif'); }
+        */
 
         @keyframes pulse {
           0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }

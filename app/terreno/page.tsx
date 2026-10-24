@@ -1,11 +1,8 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSession, signOut } from 'next-auth/react';
-import { 
-  FiNavigation, FiCheckCircle, FiXCircle, FiMapPin, FiClock, 
-  FiPower, FiAlertTriangle, FiLogOut, FiTruck, FiChevronRight, FiArrowLeft 
-} from 'react-icons/fi';
+import { FiLogOut, FiMapPin, FiCheckCircle, FiXCircle, FiNavigation, FiInfo, FiTruck } from 'react-icons/fi';
 
 const API_URL = process.env.NEXT_PUBLIC_API_GATEWAY_URL || 'https://nn4p1ybmu2.execute-api.us-east-2.amazonaws.com';
 
@@ -13,359 +10,300 @@ interface Ticket {
   id: string;
   codigoTicket: string;
   estado: string;
-  latitud: number | null;
-  longitud: number | null;
-  direccion: string;
+  latitud: number;
+  longitud: number;
   descripcionUsuario: string;
-  createdAt: string;
   categoria?: { nombre: string };
+  direccion?: string;
 }
 
 export default function TerrenoDashboard() {
   const { data: session } = useSession();
   
-  const [tareas, setTareas] = useState<Ticket[]>([]);
-  const [cargando, setCargando] = useState<boolean>(true);
-  const [ticketActivo, setTicketActivo] = useState<Ticket | null>(null);
-  
-  // Control de GPS del Funcionario
   const [gpsActivo, setGpsActivo] = useState<boolean>(false);
-  const [ubicacionActual, setubicacionActual] = useState<{lat: number, lng: number} | null>(null);
-  const watchIdRef = useRef<number | null>(null);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [cargando, setCargando] = useState<boolean>(true);
+  
+  const [textoConfirmacion, setTextoConfirmacion] = useState('');
+  const [procesando, setProcesando] = useState<boolean>(false);
 
-  // Estados para modal de rechazo
-  const [mostrandoRechazo, setMostrandoRechazo] = useState<boolean>(false);
-  const [appMapaElegida, setAppMapaElegida] = useState<string>('google');
+  const emailUsuario = session?.user?.email || '';
 
-  // Pestañas de historial
-  const [pestana, setPestana] = useState<'PENDIENTES' | 'SEMANA' | 'HISTORIAL'>('PENDIENTES');
-
-  // ID del operador logueado (puedes obtenerlo de la sesión o sincronización)
-  const operadorId = (session?.user as any)?.id || session?.user?.email;
-
-  // 1. CARGAR TAREAS DEL FUNCIONARIO
-  const cargarTareas = async () => {
-    if (!session?.user?.email) return;
-    setCargando(true);
-    try {
-      const res = await fetch(`${API_URL}/tickets?operadorEmail=${session.user.email}`);
-      if (res.ok) {
-        const data = await res.json();
-        setTareas(data);
-      }
-    } catch (error) {
-      console.error('Error cargando tareas de terreno:', error);
-    } finally {
-      setCargando(false);
-    }
-  };
-
+  // 1. PERSISTENCIA DE GPS: Recuperar estado guardado al iniciar
   useEffect(() => {
-    if (session?.user) {
-      cargarTareas();
+    const gpsGuardado = localStorage.getItem('munivox_gps_activo');
+    if (gpsGuardado === 'true') {
+      setGpsActivo(true);
     }
-  }, [session]);
+  }, []);
 
-  // 2. GESTIÓN DEL GPS EN VIVO (Batería y rendimiento optimizados)
+  // 2. CICLO DE GPS: Envía la posición inteligentemente solo si se mueven
   useEffect(() => {
-    if (gpsActivo) {
-      if ('geolocation' in navigator) {
-        watchIdRef.current = navigator.geolocation.watchPosition(
-          async (position) => {
-            const lat = position.coords.latitude;
-            const lng = position.coords.longitude;
-            setubicacionActual({ lat, lng });
-
-            // Enviar ubicación al backend para actualizar al C4
-            try {
-              await fetch(`${API_URL}/operadores/ubicacion`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: session?.user?.email, latitud: lat, longitud: lng, gpsActivo: true })
-              });
-            } catch (e) {
-              console.error("Error sincronizando GPS:", e);
-            }
-          },
-          (error) => console.error("Error de GPS:", error),
-          { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
-        );
-      } else {
-        alert("Tu dispositivo no soporta geolocalización.");
-        setGpsActivo(false);
-      }
+    let watchId: number;
+    
+    if (gpsActivo && emailUsuario) {
+      localStorage.setItem('munivox_gps_activo', 'true');
+      
+      watchId = navigator.geolocation.watchPosition(
+        async (position) => {
+          try {
+            await fetch(`${API_URL}/operadores/ubicacion`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                email: emailUsuario, 
+                latitud: position.coords.latitude, 
+                longitud: position.coords.longitude, 
+                gpsActivo: true 
+              })
+            });
+          } catch (e) {
+            console.error("Error transmitiendo GPS", e);
+          }
+        },
+        (error) => {
+          console.warn("GPS pausado o sin señal:", error.message);
+        },
+        { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
+      );
     } else {
-      if (watchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(watchIdRef.current);
-        watchIdRef.current = null;
-      }
-      // Notificar apagado de GPS al backend
-      if (session?.user?.email) {
+      localStorage.setItem('munivox_gps_activo', 'false');
+      // Avisar al servidor que se apagó el GPS
+      if (emailUsuario) {
         fetch(`${API_URL}/operadores/ubicacion`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: session?.user?.email, gpsActivo: false })
-        }).catch(() => {});
+          body: JSON.stringify({ email: emailUsuario, gpsActivo: false })
+        }).catch(console.error);
       }
     }
 
     return () => {
-      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+      if (watchId) navigator.geolocation.clearWatch(watchId);
     };
-  }, [gpsActivo, session]);
+  }, [gpsActivo, emailUsuario]);
 
-  // 3. ACCIONES DE TAREA (Aceptar / Rechazar)
-  const gestionarTicket = async (nuevoEstado: string, motivoRechazo?: string) => {
-    if (!ticketActivo) return;
-
+  // 3. CARGA DE TAREAS ASIGNADAS AL FUNCIONARIO
+  const cargarTareas = async (silencioso = false) => {
+    if (!emailUsuario) return;
+    if (!silencioso) setCargando(true);
+    
     try {
-      const res = await fetch(`${API_URL}/tickets/${ticketActivo.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nuevoEstado: nuevoEstado,
-          operadorAsignadoId: nuevoEstado === 'DESPACHADO' ? operadorId : null, // Si rechaza, libera el operador
-          comentario: motivoRechazo ? `Rechazado por funcionario: ${motivoRechazo}` : 'Aceptado y en camino'
-        })
-      });
-
+      const res = await fetch(`${API_URL}/tickets?operadorEmail=${emailUsuario}`);
       if (res.ok) {
-        setTicketActivo(null);
-        setMostrandoRechazo(false);
-        cargarTareas();
-      } else {
-        alert("Error al actualizar la tarea.");
+        const data = await res.json();
+        // Filtramos solo las que están en curso (descartamos resueltas)
+        setTickets(data.filter((t: Ticket) => t.estado !== 'RESUELTO' && t.estado !== 'DESCARTADO'));
       }
     } catch (error) {
-      console.error(error);
+      console.error('Error al cargar tareas:', error);
+    } finally {
+      if (!silencioso) setCargando(false);
     }
   };
 
-  // Abrir aplicación de mapa externa elegida
-  const abrirNavegacion = (lat: number | null, lng: number | null) => {
-    if (!lat || !lng) {
-      alert("Este reporte no cuenta con coordenadas GPS válidas.");
+  useEffect(() => {
+    cargarTareas();
+    const interval = setInterval(() => cargarTareas(true), 15000); // Autorefresco silencioso
+    return () => clearInterval(interval);
+  }, [emailUsuario]);
+
+  // 4. LÓGICA DE ACEPTAR / RECHAZAR / RESOLVER TAREAS
+  const aceptarTarea = async (id: string) => {
+    setProcesando(true);
+    try {
+      const res = await fetch(`${API_URL}/tickets/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nuevoEstado: 'DESPACHADO', comentario: 'Unidad móvil aceptó la tarea y va en camino.' })
+      });
+      if (res.ok) await cargarTareas();
+      else alert("Error al aceptar la tarea. Revisa tu conexión.");
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setProcesando(false);
+    }
+  };
+
+  const rechazarTarea = async (id: string) => {
+    const motivo = prompt("Indique brevemente el motivo del rechazo (ej: En colación, falla mecánica):");
+    if (!motivo) return; // Si cancela, no hace nada
+
+    setProcesando(true);
+    try {
+      const res = await fetch(`${API_URL}/tickets/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          operadorAsignadoId: null, // Desasignamos al operador
+          nuevoEstado: 'EN_REVISION', // Vuelve a la bandeja del departamento
+          comentario: `Rechazado por funcionario. Motivo: ${motivo}`
+        })
+      });
+      if (res.ok) await cargarTareas();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setProcesando(false);
+    }
+  };
+
+  const resolverTarea = async (id: string) => {
+    if (textoConfirmacion !== 'confirmar') {
+      alert('Debes escribir "confirmar" en minúsculas para finalizar el caso.');
       return;
     }
-
-    let url = '';
-    if (appMapaElegida === 'waze') {
-      url = `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`;
-    } else if (appMapaElegida === 'google') {
-      url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-    } else {
-      url = `https://maps.apple.com/?q=${lat},${lng}`;
+    
+    setProcesando(true);
+    try {
+      const res = await fetch(`${API_URL}/tickets/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nuevoEstado: 'RESUELTO', comentario: 'El funcionario en terreno ha resuelto el problema exitosamente.' })
+      });
+      
+      if (res.ok) {
+        setTextoConfirmacion('');
+        await cargarTareas();
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setProcesando(false);
     }
+  };
 
-    window.open(url, '_blank');
+  const abrirNavegador = (lat: number, lng: number, tipo: 'maps' | 'waze') => {
+    if (tipo === 'maps') window.open(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`, '_blank');
+    if (tipo === 'waze') window.open(`https://waze.com/ul?ll=${lat},${lng}&navigate=yes`, '_blank');
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: '#f1f5f9', fontFamily: 'system-ui, sans-serif', color: '#1e293b' }}>
+    <div style={{ backgroundColor: '#f1f5f9', minHeight: '100vh', paddingBottom: '40px', fontFamily: 'system-ui, sans-serif' }}>
       
-      {/* HEADER MÓVIL OPTIMIZADO */}
-      <header style={{ backgroundColor: '#1e293b', color: 'white', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ backgroundColor: '#3b82f6', padding: '8px', borderRadius: '10px' }}>
-            <FiTruck size={20} color="white" />
-          </div>
-          <div>
-            <h1 style={{ fontSize: '15px', fontWeight: 900, margin: 0 }}>MuniVox Terreno</h1>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>{session?.user?.name || 'Funcionario Móvil'}</span>
-          </div>
+      {/* HEADER MÓVIL */}
+      <div style={{ backgroundColor: '#0f172a', color: 'white', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'sticky', top: 0, zIndex: 50, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
+        <div>
+          <h1 style={{ fontSize: '18px', fontWeight: 900, margin: 0 }}>Móvil Terreno</h1>
+          <p style={{ fontSize: '12px', color: '#94a3b8', margin: '2px 0 0 0' }}>{session?.user?.name || emailUsuario}</p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <button 
-            onClick={() => setGpsActivo(!gpsActivo)} 
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: gpsActivo ? '#10b981' : '#64748b', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: 800, cursor: 'pointer' }}
-          >
-            <FiPower size={14} /> {gpsActivo ? 'GPS ACTIVO' : 'GPS APAGADO'}
-          </button>
-          <button onClick={() => signOut({ callbackUrl: '/login' })} style={{ background: 'transparent', border: 'none', color: '#fca5a5', cursor: 'pointer' }}>
-            <FiLogOut size={18} />
-          </button>
-        </div>
-      </header>
+        <button onClick={() => signOut({ callbackUrl: '/' })} style={{ background: 'transparent', border: 'none', color: '#ef4444', padding: '8px' }}>
+          <FiLogOut size={20} />
+        </button>
+      </div>
 
-      {/* CONTENIDO PRINCIPAL / VISTA DETALLE O LISTA */}
-      <main style={{ flex: 1, overflowY: 'auto', padding: '16px', maxWidth: '600px', width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
+      {/* CONTROL DE GPS */}
+      <div style={{ backgroundColor: 'white', padding: '16px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <span style={{ display: 'block', fontSize: '14px', fontWeight: 800, color: '#1e293b' }}>Señal GPS y Rastreo</span>
+          <span style={{ fontSize: '11px', color: gpsActivo ? '#10b981' : '#64748b', fontWeight: 600 }}>
+            {gpsActivo ? '🟢 Transmitiendo a Central C4' : '⚪ Apagado (Modo Privado)'}
+          </span>
+        </div>
         
-        {ticketActivo ? (
-          
-          /* VISTA DE DETALLE DE TAREA ASIGNADA */
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', paddingBottom: '30px' }}>
-            <button 
-              onClick={() => { setTicketActivo(null); setMostrandoRechazo(false); }}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: 'none', color: '#2563eb', fontWeight: 800, fontSize: '13px', cursor: 'pointer', padding: 0 }}
-            >
-              <FiArrowLeft size={16} /> Volver a mis tareas
-            </button>
+        {/* Toggle Switch */}
+        <div 
+          onClick={() => setGpsActivo(!gpsActivo)}
+          style={{ width: '50px', height: '28px', backgroundColor: gpsActivo ? '#10b981' : '#cbd5e1', borderRadius: '999px', position: 'relative', cursor: 'pointer', transition: 'background-color 0.3s' }}
+        >
+          <div style={{ width: '22px', height: '22px', backgroundColor: 'white', borderRadius: '50%', position: 'absolute', top: '3px', left: gpsActivo ? '25px' : '3px', transition: 'left 0.3s', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }} />
+        </div>
+      </div>
 
-            <div style={{ backgroundColor: 'white', borderRadius: '20px', overflow: 'hidden', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0' }}>
-              
-              {/* MINI MAPA SUPERIOR */}
-              <div style={{ height: '180px', backgroundColor: '#e2e8f0', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: '12px', fontWeight: 'bold' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><FiMapPin color="#ef4444" size={18} /> Coordenadas: {ticketActivo.latitud}, {ticketActivo.longitud}</span>
-              </div>
+      {/* LISTA DE TAREAS */}
+      <div style={{ padding: '20px' }}>
+        <h2 style={{ fontSize: '14px', fontWeight: 900, color: '#475569', textTransform: 'uppercase', marginBottom: '12px' }}>
+          Tus Tareas ({tickets.length})
+        </h2>
 
-              <div style={{ padding: '20px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '14px', fontWeight: 900, color: '#0284c7' }}>{ticketActivo.codigoTicket}</span>
-                  <span style={{ fontSize: '11px', fontWeight: 800, backgroundColor: '#fef3c7', color: '#d97706', padding: '4px 10px', borderRadius: '10px' }}>
-                    {ticketActivo.estado}
-                  </span>
-                </div>
-
-                <h3 style={{ fontSize: '15px', fontWeight: 800, color: '#1e293b', margin: '0 0 8px 0' }}>
-                  {ticketActivo.categoria?.nombre || 'Incidente en vía pública'}
-                </h3>
-                
-                <p style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.5, margin: '0 0 16px 0' }}>
-                  {ticketActivo.descripcionUsuario}
-                </p>
-
-                {/* BOTONES DE ACEPTAR / RECHAZAR */}
-                {!mostrandoRechazo ? (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '20px' }}>
-                    <button 
-                      onClick={() => setMostrandoRechazo(true)}
-                      style={{ padding: '14px', backgroundColor: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '14px', fontWeight: 900, fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', cursor: 'pointer' }}
-                    >
-                      <FiXCircle size={16} /> RECHAZAR
-                    </button>
-                    <button 
-                      onClick={() => gestionarTicket('DESPACHADO')}
-                      style={{ padding: '14px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '14px', fontWeight: 900, fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', cursor: 'pointer', boxShadow: '0 4px 10px rgba(16,185,129,0.3)' }}
-                    >
-                      <FiCheckCircle size={16} /> ACEPTAR
-                    </button>
-                  </div>
-                ) : (
-                  
-                  /* OPCIONES DE RECHAZO */
-                  <div style={{ backgroundColor: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1px solid #cbd5e1', marginTop: '16px' }}>
-                    <h4 style={{ fontSize: '13px', fontWeight: 900, color: '#0f172a', margin: '0 0 10px 0' }}>Seleccione el motivo del rechazo:</h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <button 
-                        onClick={() => gestionarTicket('PENDIENTE', 'Ocupado con otra tarea')}
-                        style={{ padding: '12px', backgroundColor: 'white', border: '1px solid #cbd5e1', borderRadius: '10px', fontSize: '12px', fontWeight: 700, textAlign: 'left', cursor: 'pointer' }}
-                      >
-                        1. Ocupado atendiendo otro procedimiento
-                      </button>
-                      <button 
-                        onClick={() => gestionarTicket('PENDIENTE', 'Fuera de servicio / Colación')}
-                        style={{ padding: '12px', backgroundColor: 'white', border: '1px solid #cbd5e1', borderRadius: '10px', fontSize: '12px', fontWeight: 700, textAlign: 'left', cursor: 'pointer' }}
-                      >
-                        2. Fuera de servicio operativo
-                      </button>
-                      <button 
-                        onClick={() => setMostrandoRechazo(false)}
-                        style={{ padding: '8px', background: 'transparent', border: 'none', color: '#64748b', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', textAlign: 'center' }}
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* NAVEGADOR GPS (Se habilita si ya aceptó la tarea) */}
-                {ticketActivo.estado === 'DESPACHADO' && (
-                  <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid #e2e8f0' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 900, color: '#64748b', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>
-                      Seleccionar Aplicación de Navegación:
-                    </label>
-                    <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                      {['google', 'waze', 'apple'].map((app) => (
-                        <button
-                          key={app}
-                          onClick={() => setAppMapaElegida(app)}
-                          style={{ flex: 1, padding: '8px', backgroundColor: appMapaElegida === app ? '#0284c7' : '#f1f5f9', color: appMapaElegida === app ? 'white' : '#475569', border: 'none', borderRadius: '8px', fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', cursor: 'pointer' }}
-                        >
-                          {app}
-                        </button>
-                      ))}
-                    </div>
-
-                    <button 
-                      onClick={() => abrirNavegacion(ticketActivo.latitud, ticketActivo.longitud)}
-                      style={{ width: '100%', padding: '16px', backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '14px', fontWeight: 900, fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(37,99,235,0.3)' }}
-                    >
-                      <FiNavigation size={18} /> ABRIR GPS PARA LLEGAR
-                    </button>
-                  </div>
-                )}
-
-              </div>
-            </div>
+        {cargando ? (
+          <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>Actualizando operaciones...</div>
+        ) : tickets.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '60px 20px', backgroundColor: 'white', borderRadius: '16px', border: '1px dashed #cbd5e1' }}>
+            <FiCheckCircle size={40} color="#10b981" style={{ marginBottom: '16px' }} />
+            <h3 style={{ margin: 0, fontSize: '16px', color: '#0f172a' }}>Sin tareas pendientes</h3>
+            <p style={{ fontSize: '13px', color: '#64748b' }}>Puedes descansar o mantener patrullaje preventivo.</p>
           </div>
         ) : (
-          
-          /* VISTA DE LISTA DE TAREAS Y PESTAÑAS */
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            
-            {/* PESTAÑAS */}
-            <div style={{ display: 'flex', backgroundColor: '#e2e8f0', padding: '4px', borderRadius: '14px' }}>
-              <button 
-                onClick={() => setPestana('PENDIENTES')}
-                style={{ flex: 1, padding: '10px', backgroundColor: pestana === 'PENDIENTES' ? 'white' : 'transparent', border: 'none', borderRadius: '10px', fontSize: '11px', fontWeight: 900, color: pestana === 'PENDIENTES' ? '#0f172a' : '#64748b', cursor: 'pointer', boxShadow: pestana === 'PENDIENTES' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
-              >
-                ASIGNADAS
-              </button>
-              <button 
-                onClick={() => setPestana('SEMANA')}
-                style={{ flex: 1, padding: '10px', backgroundColor: pestana === 'SEMANA' ? 'white' : 'transparent', border: 'none', borderRadius: '10px', fontSize: '11px', fontWeight: 900, color: pestana === 'SEMANA' ? '#0f172a' : '#64748b', cursor: 'pointer', boxShadow: pestana === 'SEMANA' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
-              >
-                ÚLTIMA SEMANA
-              </button>
-              <button 
-                onClick={() => setPestana('HISTORIAL')}
-                style={{ flex: 1, padding: '10px', backgroundColor: pestana === 'HISTORIAL' ? 'white' : 'transparent', border: 'none', borderRadius: '10px', fontSize: '11px', fontWeight: 900, color: pestana === 'HISTORIAL' ? '#0f172a' : '#64748b', cursor: 'pointer', boxShadow: pestana === 'HISTORIAL' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
-              >
-                HISTORIAL
-              </button>
-            </div>
+            {tickets.map(ticket => {
+              
+              const esperandoConfirmacion = ticket.estado === 'EN_REVISION';
+              const tareaActiva = ticket.estado === 'DESPACHADO';
 
-            {/* LISTADO */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {cargando ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: '#64748b', fontSize: '12px', fontWeight: 'bold' }}>
-                  ACTUALIZANDO TAREAS...
-                </div>
-              ) : tareas.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px', backgroundColor: 'white', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
-                  <FiCheckCircle size={32} color="#10b981" style={{ marginBottom: '8px' }} />
-                  <p style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b', margin: 0 }}>Sin tareas pendientes</p>
-                  <p style={{ fontSize: '11px', color: '#64748b', margin: '4px 0 0 0' }}>Te avisaremos cuando el C4 te despache un procedimiento.</p>
-                </div>
-              ) : (
-                tareas.map(t => (
-                  <div 
-                    key={t.id}
-                    onClick={() => setTicketActivo(t)}
-                    style={{ backgroundColor: 'white', padding: '16px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}
-                  >
-                    <div>
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '4px' }}>
-                        <span style={{ fontSize: '12px', fontWeight: 900, color: '#0f172a' }}>{t.codigoTicket}</span>
-                        <span style={{ fontSize: '9px', fontWeight: 800, padding: '2px 8px', borderRadius: '6px', backgroundColor: t.estado === 'DESPACHADO' ? '#dbeafe' : '#fef3c7', color: t.estado === 'DESPACHADO' ? '#1d4ed8' : '#d97706' }}>
-                          {t.estado}
-                        </span>
-                      </div>
-                      <p style={{ fontSize: '12px', color: '#475569', margin: 0, fontWeight: 600 }}>{t.categoria?.nombre || 'Incidente'}</p>
-                      <span style={{ fontSize: '10px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px' }}>
-                        <FiClock size={10} /> {new Date(t.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
-                    <FiChevronRight color="#94a3b8" size={20} />
+              return (
+                <div key={ticket.id} style={{ backgroundColor: 'white', borderRadius: '16px', overflow: 'hidden', border: `1px solid ${esperandoConfirmacion ? '#f59e0b' : '#3b82f6'}`, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+                  
+                  {/* Etiqueta de Estado */}
+                  <div style={{ backgroundColor: esperandoConfirmacion ? '#fffbeb' : '#eff6ff', padding: '10px 16px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 900, color: '#0f172a' }}>{ticket.codigoTicket}</span>
+                    <span style={{ fontSize: '11px', fontWeight: 800, color: esperandoConfirmacion ? '#d97706' : '#2563eb' }}>
+                      {esperandoConfirmacion ? '🚨 NUEVA ASIGNACIÓN' : '🚙 EN CAMINO'}
+                    </span>
                   </div>
-                ))
-              )}
-            </div>
 
+                  <div style={{ padding: '16px' }}>
+                    <h3 style={{ fontSize: '15px', fontWeight: 800, margin: '0 0 8px 0', color: '#1e293b' }}>
+                      {ticket.categoria?.nombre || 'Solicitud'}
+                    </h3>
+                    <p style={{ fontSize: '13px', color: '#475569', margin: '0 0 16px 0', lineHeight: 1.5 }}>
+                      {ticket.descripcionUsuario}
+                    </p>
+
+                    {/* BOTONES DE NAVEGACIÓN DIRECTA */}
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
+                      <button onClick={() => abrirNavegador(ticket.latitud, ticket.longitud, 'waze')} style={{ flex: 1, padding: '10px', backgroundColor: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px' }}>
+                        <FiNavigation /> WAZE
+                      </button>
+                      <button onClick={() => abrirNavegador(ticket.latitud, ticket.longitud, 'maps')} style={{ flex: 1, padding: '10px', backgroundColor: '#f1f5f9', color: '#334155', border: 'none', borderRadius: '8px', fontSize: '12px', fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px' }}>
+                        <FiMapPin /> MAPS
+                      </button>
+                    </div>
+
+                    {/* ACCIONES SEGÚN ESTADO */}
+                    {esperandoConfirmacion && (
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button onClick={() => rechazarTarea(ticket.id)} disabled={procesando} style={{ flex: 1, padding: '12px', backgroundColor: 'white', color: '#ef4444', border: '1px solid #ef4444', borderRadius: '12px', fontSize: '13px', fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px' }}>
+                          <FiXCircle /> RECHAZAR
+                        </button>
+                        <button onClick={() => aceptarTarea(ticket.id)} disabled={procesando} style={{ flex: 2, padding: '12px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '12px', fontSize: '13px', fontWeight: 800, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px' }}>
+                          <FiTruck /> ACEPTAR E IR
+                        </button>
+                      </div>
+                    )}
+
+                    {tareaActiva && (
+                      <div style={{ backgroundColor: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px dashed #cbd5e1' }}>
+                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: '#64748b', marginBottom: '8px' }}>
+                          ESCRIBE "confirmar" PARA FINALIZAR
+                        </label>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <input 
+                            type="text" 
+                            placeholder="confirmar" 
+                            value={textoConfirmacion}
+                            onChange={(e) => setTextoConfirmacion(e.target.value)}
+                            style={{ flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '14px' }}
+                          />
+                          <button 
+                            onClick={() => resolverTarea(ticket.id)}
+                            disabled={textoConfirmacion !== 'confirmar' || procesando}
+                            style={{ padding: '12px 20px', backgroundColor: textoConfirmacion === 'confirmar' ? '#10b981' : '#cbd5e1', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 800, transition: 'background 0.3s' }}
+                          >
+                            LISTO
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
-
-      </main>
+      </div>
     </div>
   );
 }
