@@ -53,12 +53,13 @@ const UNIDADES_VECINALES = [
 
 interface MapProps {
   tickets: any[];
-  fantasmas?: any[]; 
-  coordenadaSeleccionada?: [number, number] | null; 
+  fantasmas?: any[];
+  coordenadaSeleccionada?: [number, number] | null;
   onTicketSelect: (id: string) => void;
+  usarIconos3D?: boolean; // Propiedad para activar los iconos 2.5D animado
 }
 
-export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, onTicketSelect }: MapProps) {
+export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, onTicketSelect, usarIconos3D = false }: MapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
 
@@ -68,7 +69,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
 
   const uvActual = UNIDADES_VECINALES.find(uv => uv.id === uvSeleccionadaId);
 
-  // Inicialización del Mapa Base
+  // Inicialización del Mapa
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
@@ -77,7 +78,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
       style: 'mapbox://styles/mapbox/light-v11',
-      center: [-70.7415, -33.7312], 
+      center: [-70.7415, -33.7312],
       zoom: 13,
       pitch: 0,
       bearing: 0,
@@ -147,11 +148,11 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
     return () => map.remove();
   }, []);
 
-  // Volar a coordenada seleccionada
+  // Efecto para centrar el mapa SOLO cuando cambia la coordenada real, no en cada refresco
   useEffect(() => {
     if (mapRef.current && coordenadaSeleccionada && coordenadaSeleccionada[0] && coordenadaSeleccionada[1]) {
       mapRef.current.flyTo({
-        center: [coordenadaSeleccionada[1], coordenadaSeleccionada[0]],
+        center: [coordenadaSeleccionada[1], coordenadaSeleccionada[0]], // Mapbox usa [longitud, latitud]
         zoom: 16,
         essential: true,
         duration: 1500
@@ -159,7 +160,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
     }
   }, [coordenadaSeleccionada?.[0], coordenadaSeleccionada?.[1]]);
 
-  // Capas de Unidades Vecinales
+  // Efectos de UVs
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
@@ -179,7 +180,7 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
   }, [mostrarBordesUV]);
 
   // ==========================================
-  // RENDERIZADO DE MARCADORES (TICKETS)
+  // RENDERIZAR TICKETS
   // ==========================================
   useEffect(() => {
     const map = mapRef.current;
@@ -192,71 +193,65 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
       const popupNode = document.createElement('div');
       popupNode.style.fontFamily = 'sans-serif';
       popupNode.style.minWidth = '140px';
-      
-      const nombreCategoria = typeof t.categoria === 'string' 
-        ? t.categoria 
-        : (t.categoria?.nombre || t.categoriaNombre || 'Incidencia');
-
       popupNode.innerHTML = `
-        <span style="font-size: 10px; font-weight: 900; color: #0284c7;">${t.codigoTicket || ''}</span>
-        <p style="font-size: 12px; font-weight: bold; margin: 4px 0;">${nombreCategoria}</p>
+        <span style="font-size: 10px; font-weight: 900; color: #0284c7;">${t.codigoTicket}</span>
+        <p style="font-size: 12px; font-weight: bold; margin: 4px 0;">${t.categoria?.nombre || 'Incidencia'}</p>
         <button id="btn-ticket-${t.id}" style="width: 100%; background-color: #2563eb; color: white; border: none; padding: 6px; border-radius: 6px; font-weight: bold; font-size: 11px; cursor: pointer;">
           Ver Expediente
         </button>
       `;
-      
       popupNode.querySelector(`#btn-ticket-${t.id}`)?.addEventListener('click', () => onTicketSelect(t.id));
       const popup = new mapboxgl.Popup({ offset: 25 }).setDOMContent(popupNode);
 
-      // Normalización estricta de la categoría
-      const catId = t.categoria?.id;
-      const catText = nombreCategoria.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      
-      let claseMarcador = '';
-
-      if (catId === 1 || catText.includes('vehiculo') || catText.includes('auto') || catText.includes('abandonado')) {
-        claseMarcador = 'auto-abandonado';
-      } else if (catId === 2 || catText.includes('basura') || catText.includes('escombro') || catText.includes('microbasural')) {
-        claseMarcador = 'basura';
-      } else if (catId === 3 || catText.includes('alumbrado') || catText.includes('luz') || catText.includes('luminaria')) {
-        claseMarcador = 'alumbrado';
-      } else if (catId === 4 || catText.includes('ruido') || catText.includes('fiesta') || catText.includes('molesto')) {
-        claseMarcador = 'ruidos';
-      } else if (catId === 5 || catText.includes('bache') || catText.includes('hoyo') || catText.includes('vial') || catText.includes('pavimento')) {
-        claseMarcador = 'bache';
-      }
-
       let marker: mapboxgl.Marker;
 
-      if (claseMarcador) {
-        const customMarkerContainer = document.createElement('div');
-        customMarkerContainer.className = 'marcador-container';
+      if (usarIconos3D) {
+        // MODO C4: Iconos 3D y lectura inteligente de palabras clave
+        const catName = (t.categoria?.nombre || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const desc = (t.descripcionUsuario || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const textoClave = `${catName} ${desc}`;
+        
+        let claseMarcador = '';
+        if (textoClave.includes('vehiculo') || textoClave.includes('auto')) claseMarcador = 'auto-abandonado';
+        else if (textoClave.includes('basura') || textoClave.includes('escombro') || textoClave.includes('microbasural')) claseMarcador = 'basura';
+        else if (textoClave.includes('alumbrado') || textoClave.includes('luz') || textoClave.includes('poste')) claseMarcador = 'alumbrado';
+        else if (textoClave.includes('ruido') || textoClave.includes('fiesta') || textoClave.includes('musica')) claseMarcador = 'ruidos';
+        else if (textoClave.includes('bache') || textoClave.includes('hoyo') || textoClave.includes('vial')) claseMarcador = 'bache';
+        else if (textoClave.includes('animal') || textoClave.includes('perro') || textoClave.includes('vaca')) claseMarcador = 'animales';
+        else if (textoClave.includes('senal') || textoClave.includes('transito') || textoClave.includes('pare')) claseMarcador = 'senaletica';
+        else if (textoClave.includes('verde') || textoClave.includes('riego') || textoClave.includes('arbol') || textoClave.includes('plaza')) claseMarcador = 'plaza';
 
-        const customMarkerImg = document.createElement('div');
-        customMarkerImg.className = `marcador-img ${claseMarcador}`;
-        customMarkerContainer.appendChild(customMarkerImg);
+        if (claseMarcador) {
+          const customMarkerContainer = document.createElement('div');
+          customMarkerContainer.className = 'marcador-container';
+          const customMarkerImg = document.createElement('div');
+          customMarkerImg.className = `marcador-img ${claseMarcador}`;
+          customMarkerContainer.appendChild(customMarkerImg);
 
-        marker = new mapboxgl.Marker({ element: customMarkerContainer, anchor: 'bottom' })
-          .setLngLat([Number(t.longitud), Number(t.latitud)])
-          .setPopup(popup)
-          .addTo(map);
+          marker = new mapboxgl.Marker({ element: customMarkerContainer, anchor: 'bottom' })
+            .setLngLat([t.longitud, t.latitud])
+            .setPopup(popup)
+            .addTo(map);
 
-        popup.on('open', () => customMarkerImg.classList.add('activo'));
-        popup.on('close', () => customMarkerImg.classList.remove('activo'));
+          popup.on('open', () => customMarkerImg.classList.add('activo'));
+          popup.on('close', () => customMarkerImg.classList.remove('activo'));
+        } else {
+          // Fallback al pin si no pilla palabras clave
+          marker = new mapboxgl.Marker({ color: '#2563eb' }).setLngLat([t.longitud, t.latitud]).setPopup(popup).addTo(map);
+        }
       } else {
-        marker = new mapboxgl.Marker({ color: '#2563eb' })
-          .setLngLat([Number(t.longitud), Number(t.latitud)])
-          .setPopup(popup)
-          .addTo(map);
+        // MODO TERRENO/DEPARTAMENTO: Solo el Pin normal
+        marker = new mapboxgl.Marker({ color: '#2563eb' }).setLngLat([t.longitud, t.latitud]).setPopup(popup).addTo(map);
       }
+      
       markers.push(marker);
     });
 
     return () => markers.forEach((m) => m.remove());
-  }, [tickets, onTicketSelect]);
+  }, [tickets, onTicketSelect, usarIconos3D]);
 
   // ==========================================
-  // RENDERIZADO DE FUNCIONARIOS (FANTASMAS)
+  // RENDERIZAR FUNCIONARIOS (FANTASMAS)
   // ==========================================
   useEffect(() => {
     const map = mapRef.current;
@@ -291,14 +286,14 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
         <div style="font-family: sans-serif; text-align: center; min-width: 120px;">
           <strong style="color: ${isOnline ? '#10b981' : '#64748b'}; font-size: 13px;">${f.nombre}</strong><br/>
           <span style="font-size: 11px; font-weight: bold; color: ${isOnline ? '#059669' : '#94a3b8'};">
-            ${isOnline ? '🟢 GPS Activo' : '⚪ GPS Apagado'}
+            ${isOnline ? '🟢 GPS Activo en vivo' : '⚪ GPS Apagado'}
           </span><br/>
           ${!isOnline ? `<span style="font-size: 10px; color: #cbd5e1;">Última pos: ${fechaUltima}</span>` : ''}
         </div>
       `);
 
       const marker = new mapboxgl.Marker({ element: el })
-        .setLngLat([Number(f.longitud), Number(f.latitud)])
+        .setLngLat([f.longitud, f.latitud])
         .setPopup(popup)
         .addTo(map);
 
@@ -323,83 +318,69 @@ export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, o
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
 
-      {/* REGLAS CSS GLOBALES PARA LOS ICONOS */}
       <style>{`
-        .marcador-container {
-          width: 50px !important;
-          height: 50px !important;
-          position: relative !important;
-          display: block !important;
-          z-index: 10;
-        }
-
+        /* TAMAÑO OPTIMIZADO: 45px para no invadir las calles */
+        .marcador-container { width: 45px; height: 45px; z-index: 1; }
+        
         .marcador-img {
-          width: 100% !important;
-          height: 100% !important;
-          display: block !important;
-          background-size: contain !important;
-          background-repeat: no-repeat !important;
-          background-position: center bottom !important;
-          transform-origin: bottom center;
-          cursor: pointer;
-          transition: transform 0.2s ease, filter 0.2s ease;
-          filter: drop-shadow(0px 3px 4px rgba(0,0,0,0.3));
+          width: 100%; height: 100%; background-size: contain; background-repeat: no-repeat;
+          background-position: center bottom; transform-origin: bottom center; cursor: pointer;
+          transition: transform 0.2s ease, filter 0.2s ease; filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.3));
         }
-
+        
+        /* HOVER: Crece solo un poquito y se eleva sutilmente */
         .marcador-img:hover {
-          transform: translateY(-3px) scale(1.1);
-          filter: drop-shadow(0px 6px 5px rgba(0,0,0,0.4));
+          transform: translateY(-4px) scale(1.15);
+          filter: drop-shadow(0px 6px 4px rgba(0,0,0,0.4));
         }
-
+        
+        /* ACTIVO (CLIC): Se mantiene en su tamaño base pero con brillo */
         .marcador-img.activo {
           transform: translateY(0px) scale(1.05);
           filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.3)) drop-shadow(0 0 10px rgba(56, 189, 248, 0.9));
         }
 
         /* 1. AUTO ABANDONADO */
-        .marcador-img.auto-abandonado { 
-          background-image: url('/marcadores/auto-estatico.png') !important; 
-        }
-        .marcador-img.auto-abandonado:hover, 
-        .marcador-img.auto-abandonado.activo { 
-          background-image: url('/marcadores/ezgif-maker.gif') !important, url('/marcadores/auto.gif') !important; 
-        }
-
-        /* 2. BASURA */
-        .marcador-img.basura { 
-          background-image: url('/marcadores/basura-estatica.png') !important; 
-        }
-        .marcador-img.basura:hover, 
-        .marcador-img.basura.activo { 
-          background-image: url('/marcadores/basura.gif') !important; 
-        }
+        .marcador-img.auto-abandonado { background-image: url('/marcadores/auto-estatico.png'); }
+        .marcador-img.auto-abandonado:hover, .marcador-img.auto-abandonado.activo { background-image: url('/marcadores/auto.gif'); }
+        
+        /* 2. BASURA / ESCOMBROS */
+        .marcador-img.basura { background-image: url('/marcadores/basura-estatica.png'); }
+        .marcador-img.basura:hover, .marcador-img.basura.activo { background-image: url('/marcadores/basura.gif'); }
 
         /* 3. ALUMBRADO */
-        .marcador-img.alumbrado { 
-          background-image: url('/marcadores/alumbrado-estatico.png') !important; 
-        }
-        .marcador-img.alumbrado:hover, 
-        .marcador-img.alumbrado.activo { 
-          background-image: url('/marcadores/alumbrado.gif') !important; 
-        }
+        .marcador-img.alumbrado { background-image: url('/marcadores/alumbrado-estatico.png'); }
+        .marcador-img.alumbrado:hover, .marcador-img.alumbrado.activo { background-image: url('/marcadores/alumbrado.gif'); }
 
         /* 4. RUIDOS */
-        .marcador-img.ruidos { 
-          background-image: url('/marcadores/ruidos-estatico.png') !important; 
-        }
-        .marcador-img.ruidos:hover, 
-        .marcador-img.ruidos.activo { 
-          background-image: url('/marcadores/ruidos.gif') !important; 
-        }
+        .marcador-img.ruidos { background-image: url('/marcadores/ruidos-estatico.png'); }
+        .marcador-img.ruidos:hover, .marcador-img.ruidos.activo { background-image: url('/marcadores/ruidos.gif'); }
 
-        /* 5. BACHE */
-        .marcador-img.bache { 
-          background-image: url('/marcadores/bache-estatico.png') !important; 
-        }
-        .marcador-img.bache:hover, 
-        .marcador-img.bache.activo { 
-          background-image: url('/marcadores/bache.gif') !important; 
-        }
+        /* 5. BACHE / DAÑO VIAL */
+        .marcador-img.bache { background-image: url('/marcadores/bache-estatico.png'); }
+        .marcador-img.bache:hover, .marcador-img.bache.activo { background-image: url('/marcadores/bache.gif'); }
+
+        /* ========================================= */
+        /* ICONOS EN RESERVA (Aún sin diseño final)  */
+        /* ========================================= */
+        
+        /* 6. ANIMALES SUELTOS */
+        /*
+        .marcador-img.animales { background-image: url('/marcadores/animal-estatico.png'); }
+        .marcador-img.animales:hover, .marcador-img.animales.activo { background-image: url('/marcadores/animal.gif'); }
+        */
+
+        /* 7. SEÑALÉTICA */
+        /*
+        .marcador-img.senaletica { background-image: url('/marcadores/senalitica-estatico.png'); }
+        .marcador-img.senaletica:hover, .marcador-img.senaletica.activo { background-image: url('/marcadores/senalitica.gif'); }
+        */
+
+        /* 8. ÁREAS VERDES / PLAZAS */
+        /*
+        .marcador-img.plaza { background-image: url('/marcadores/plaza-estatico.png'); }
+        .marcador-img.plaza:hover, .marcador-img.plaza.activo { background-image: url('/marcadores/plaza.gif'); }
+        */
 
         @keyframes pulse {
           0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
