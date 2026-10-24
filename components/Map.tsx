@@ -56,10 +56,16 @@ interface MapProps {
   fantasmas?: any[];
   coordenadaSeleccionada?: [number, number] | null;
   onTicketSelect: (id: string) => void;
-  usarIconos3D?: boolean; // Propiedad para activar los iconos 2.5D animado
+  usarIconos3D?: boolean; // Propiedad para activar los iconos 2.5D animados
 }
 
-export default function Map({ tickets, fantasmas = [], coordenadaSeleccionada, onTicketSelect, usarIconos3D = false }: MapProps) {
+export default function Map({ 
+  tickets, 
+  fantasmas = [], 
+  coordenadaSeleccionada, 
+  onTicketSelect, 
+  usarIconos3D = true // 👈 CORREGIDO: Por defecto activado en TRUE
+}: MapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
 
