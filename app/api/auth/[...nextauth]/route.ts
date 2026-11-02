@@ -45,11 +45,12 @@ const handler = NextAuth({
 
           // 3. Validar si Cognito entregó el Token de acceso
           if (data.AuthenticationResult) {
-            return { 
-              id: credentials.email, 
-              name: "Operador Autorizado", 
-              email: credentials.email, 
-              role: "OPERADOR" 
+            return {
+              id: credentials.email,
+              name: "Operador Autorizado",
+              email: credentials.email,
+              role: "OPERADOR",
+              idToken: data.AuthenticationResult.IdToken,
             };
           }
           
@@ -67,6 +68,7 @@ const handler = NextAuth({
     async jwt({ token, user }) {
       if (user) {
         token.role = (user as any).role;
+        token.idToken = (user as any).idToken;
       }
       return token;
     },
@@ -74,6 +76,7 @@ const handler = NextAuth({
       if (session.user) {
         (session.user as any).role = token.role;
       }
+      (session as any).idToken = token.idToken;
       return session;
     }
   },
