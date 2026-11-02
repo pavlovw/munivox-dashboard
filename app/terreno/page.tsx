@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import dynamic from 'next/dynamic';
 import { FiLogOut, FiCheckCircle, FiXCircle, FiNavigation, FiMap, FiArrowLeft, FiCamera } from 'react-icons/fi';
+import { useApi } from '../../lib/useApi';
 
 // Importamos el mismo mapa ligero y optimizado que usa el Departamento
 const MapComponentSimple = dynamic(() => import('@/components/Map'), { 
@@ -26,6 +27,7 @@ interface Ticket {
 
 export default function TerrenoDashboard() {
   const { data: session } = useSession();
+  const api = useApi();
   const emailUsuario = session?.user?.email || '';
 
   const [gpsActivo, setGpsActivo] = useState<boolean>(false);
@@ -53,7 +55,7 @@ export default function TerrenoDashboard() {
       watchId = navigator.geolocation.watchPosition(
         async (position) => {
           try {
-            await fetch(`${API_URL}/operadores/ubicacion`, {
+            await api(`${API_URL}/operadores/ubicacion`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ email: emailUsuario, latitud: position.coords.latitude, longitud: position.coords.longitude, gpsActivo: true })
@@ -66,7 +68,7 @@ export default function TerrenoDashboard() {
     } else {
       localStorage.setItem('munivox_gps_activo', 'false');
       if (emailUsuario) {
-        fetch(`${API_URL}/operadores/ubicacion`, {
+        api(`${API_URL}/operadores/ubicacion`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: emailUsuario, gpsActivo: false })
@@ -81,7 +83,7 @@ export default function TerrenoDashboard() {
     if (!emailUsuario) return;
     if (!silencioso) setCargando(true);
     try {
-      const res = await fetch(`${API_URL}/tickets?operadorEmail=${emailUsuario}`);
+      const res = await api(`${API_URL}/tickets?operadorEmail=${emailUsuario}`);
       if (res.ok) {
         const data = await res.json();
         const activos = data.filter((t: Ticket) => t.estado !== 'RESUELTO' && t.estado !== 'DESCARTADO');
@@ -110,7 +112,7 @@ export default function TerrenoDashboard() {
     if (!ticketActivo) return;
     setProcesando(true);
     try {
-      const res = await fetch(`${API_URL}/tickets/${ticketActivo.id}`, {
+      const res = await api(`${API_URL}/tickets/${ticketActivo.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nuevoEstado: 'DESPACHADO', comentario: 'Unidad móvil aceptó la tarea y va en camino.' })
@@ -129,7 +131,7 @@ export default function TerrenoDashboard() {
 
     setProcesando(true);
     try {
-      const res = await fetch(`${API_URL}/tickets/${ticketActivo.id}`, {
+      const res = await api(`${API_URL}/tickets/${ticketActivo.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ operadorAsignadoId: null, nuevoEstado: 'EN_REVISION', comentario: `Rechazado por funcionario: ${motivo}` })
@@ -148,7 +150,7 @@ export default function TerrenoDashboard() {
     }
     setProcesando(true);
     try {
-      const res = await fetch(`${API_URL}/tickets/${ticketActivo.id}`, {
+      const res = await api(`${API_URL}/tickets/${ticketActivo.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nuevoEstado: 'RESUELTO', comentario: 'El funcionario ha resuelto el problema.' })

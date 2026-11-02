@@ -7,6 +7,7 @@ import {
   FiMap, FiTarget, FiUserCheck, FiArrowLeft, FiLogOut, 
   FiAlertCircle, FiClock, FiMapPin, FiTruck, FiCheckCircle, FiBell, FiX 
 } from 'react-icons/fi';
+import { useApi } from '../../lib/useApi';
 
 const MapComponent = dynamic(() => import('@/components/Map'), { 
   ssr: false,
@@ -51,6 +52,7 @@ interface Funcionario {
 
 export default function DepartamentoDashboard() {
   const { data: session } = useSession();
+  const api = useApi();
   
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [funcionarios, setFuncionarios] = useState<Funcionario[]>([]);
@@ -84,13 +86,13 @@ export default function DepartamentoDashboard() {
     if (!silencioso) setCargando(true); 
     
     try {
-      const resTickets = await fetch(`${API_URL}/tickets?departamentoId=${infoDepartamento.id}`);
+      const resTickets = await api(`${API_URL}/tickets?departamentoId=${infoDepartamento.id}`);
       if (resTickets.ok) {
         const dataTickets = await resTickets.json();
         setTickets(dataTickets.filter((t: Ticket) => t.estado !== 'RESUELTO' && t.estado !== 'DESCARTADO'));
       }
 
-      const resFuncionarios = await fetch(`${API_URL}/operadores?departamentoId=${infoDepartamento.id}&rol=TERRENO`);
+      const resFuncionarios = await api(`${API_URL}/operadores?departamentoId=${infoDepartamento.id}&rol=TERRENO`);
       if (resFuncionarios.ok) {
         const dataFuncionarios = await resFuncionarios.json();
         
@@ -148,7 +150,7 @@ export default function DepartamentoDashboard() {
     setProcesandoAsignacion(true);
 
     try {
-      const res = await fetch(`${API_URL}/tickets/${ticketSeleccionado.id}`, {
+      const res = await api(`${API_URL}/tickets/${ticketSeleccionado.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 

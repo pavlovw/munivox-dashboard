@@ -15,6 +15,8 @@ import Kanban from '../components/Kanban';
 import Estadisticas from '../components/Estadisticas';
 import AdminPanel from '../components/AdminPanel';
 
+import { useApi } from '../lib/useApi';
+
 const MapComponent = dynamic(() => import('../components/Map'), { 
   ssr: false,
   loading: () => (
@@ -44,6 +46,7 @@ interface Ticket {
 export default function Dashboard() {
   const { data: session, status } = useSession(); 
   const router = useRouter();
+  const api = useApi();
   
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -76,7 +79,7 @@ export default function Dashboard() {
       
       const inicializarSesion = async () => {
         try {
-          await fetch(`${API_GATEWAY_URL}/operadores/sincronizar`, {
+          await api(`${API_GATEWAY_URL}/operadores/sincronizar`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -111,7 +114,7 @@ export default function Dashboard() {
 
   const fetchTickets = async () => {
     try {
-      const res = await fetch(`${API_GATEWAY_URL}/tickets`);
+      const res = await api(`${API_GATEWAY_URL}/tickets`);
       if (res.ok) setTickets(await res.json());
     } catch (error) { 
       console.error(error); 
@@ -141,7 +144,7 @@ export default function Dashboard() {
 
   const abrirDetalle = async (id: string, lat: number | null, lng: number | null) => {
     try {
-      const res = await fetch(`${API_GATEWAY_URL}/tickets/${id}`);
+      const res = await api(`${API_GATEWAY_URL}/tickets/${id}`);
       if (res.ok) {
         const detalle: Ticket = await res.json();
         
@@ -156,7 +159,7 @@ export default function Dashboard() {
         if (lat && lng) {
           setCoordenadaEnfoque([lat, lng]);
           try {
-            const resCercanos = await fetch(`${API_GATEWAY_URL}/tickets/cercanos?lat=${lat}&lng=${lng}`);
+            const resCercanos = await api(`${API_GATEWAY_URL}/tickets/cercanos?lat=${lat}&lng=${lng}`);
             if (resCercanos.ok) setTicketsCercanos(await resCercanos.json());
           } catch (e) {
             console.warn("Ruta de tickets cercanos no disponible", e);
@@ -177,7 +180,7 @@ export default function Dashboard() {
 
   const cambiarEstado = async (ticketId: string, nuevoEstado: string) => {
     try {
-      const res = await fetch(`${API_GATEWAY_URL}/tickets/${ticketId}`, {
+      const res = await api(`${API_GATEWAY_URL}/tickets/${ticketId}`, {
         method: 'PUT', 
         headers: { 'Content-Type': 'application/json' }, 
         body: JSON.stringify({ nuevoEstado })
@@ -198,7 +201,7 @@ export default function Dashboard() {
     }
 
     try {
-      const res = await fetch(`${API_GATEWAY_URL}/tickets/${ticketId}`, {
+      const res = await api(`${API_GATEWAY_URL}/tickets/${ticketId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, 
         body: JSON.stringify({ nuevoEstado: 'DESPACHADO', departamentoAsignado: departamentoDerivacion })
       });
