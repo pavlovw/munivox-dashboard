@@ -55,11 +55,11 @@ export default function TerrenoDashboard() {
       watchId = navigator.geolocation.watchPosition(
         async (position) => {
           try {
-            await api(`${API_URL}/operadores/ubicacion`, {
+            api(`${API_URL}/operadores/ubicacion`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: emailUsuario, latitud: position.coords.latitude, longitud: position.coords.longitude, gpsActivo: true })
-            });
+              body: JSON.stringify({ gpsActivo: true })
+            }).then(r => { if (!r.ok) console.error('GPS PUT falló', r.status); });
           } catch (e) {}
         },
         (error) => console.warn(error),
