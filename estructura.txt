@@ -1,0 +1,76 @@
+C:\Users\pablo\Desktop\munivox-dashboard
+├── AGENTS.md
+├── amplify.yml
+├── app
+|  ├── api
+|  |  └── auth
+|  |     └── [...nextauth]
+|  |        └── route.ts
+|  ├── departamentos
+|  |  └── page.tsx
+|  ├── favicon.ico
+|  ├── globals.css
+|  ├── layout.tsx
+|  ├── login
+|  |  └── page.tsx
+|  ├── page.tsx
+|  ├── Providers.tsx
+|  └── terreno
+|     └── page.tsx
+├── components
+|  ├── AdminPanel.tsx
+|  ├── Estadisticas.tsx
+|  ├── Kanban.tsx
+|  └── Map.tsx
+├── data
+|  ├── buin-boundary.json
+|  └── unidades-vecinales
+|     ├── unidad-vecinal-1.json
+|     ├── unidad-vecinal-10.json
+|     ├── unidad-vecinal-11.json
+|     ├── unidad-vecinal-12.json
+|     ├── unidad-vecinal-13.json
+|     ├── unidad-vecinal-14.json
+|     ├── unidad-vecinal-15.json
+|     ├── unidad-vecinal-16.json
+|     ├── unidad-vecinal-17.json
+|     ├── unidad-vecinal-18.json
+|     ├── unidad-vecinal-19.json
+|     ├── unidad-vecinal-2.json
+|     ├── unidad-vecinal-3.json
+|     ├── unidad-vecinal-4.json
+|     ├── unidad-vecinal-5.json
+|     ├── unidad-vecinal-6.json
+|     ├── unidad-vecinal-7.json
+|     ├── unidad-vecinal-8.json
+|     └── unidad-vecinal-9.json
+├── eslint.config.mjs
+├── estructura.txt
+├── middleware.ts
+├── next-env.d.ts
+├── next.config.ts
+├── package-lock.json
+├── package.json
+├── public
+|  ├── file.svg
+|  ├── globe.svg
+|  ├── marcadores
+|  |  ├── alumbrado-estatico.png
+|  |  ├── alumbrado.gif
+|  |  ├── auto-estatico.png
+|  |  ├── auto.gif
+|  |  ├── bache-estatico.png
+|  |  ├── bache.gif
+|  |  ├── basura-estatica.png
+|  |  ├── basura.gif
+|  |  ├── ruidos-estatico.png
+|  |  └── ruidos.gif
+|  ├── next.svg
+|  ├── vercel.svg
+|  └── window.svg
+├── README.md
+└── tsconfig.json
+
+directory: 2665 file: 34210
+
+ignored: directory (145)

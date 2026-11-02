@@ -126,11 +126,23 @@ export default function Dashboard() {
   useEffect(() => {
     if (!sincronizandoUsuario) {
       fetchTickets();
-      const socket = io("https://socket-service.politeplant-263a4d5b.eastus.azurecontainerapps.io", { transports: ['websocket', 'polling'] });
-      socket.on('actualizar_dashboard', () => fetchTickets());
+      
+      const socket = io("https://socket-service.politeplant-263a4d5b.eastus.azurecontainerapps.io", { 
+        transports: ['websocket', 'polling'],
+        auth: {
+          token: (session as any)?.idToken
+        }
+      });
+
+      // CORRECCIÓN AQUÍ: Escuchar exactamente el mismo evento que emite el servidor
+      socket.on('ticket-actualizado', (nuevoTicket) => {
+        console.log("¡Actualización recibida en tiempo real!", nuevoTicket);
+        fetchTickets(); // Esto recargará los tickets sin presionar F5
+      });
+
       return () => { socket.disconnect(); };
     }
-  }, [sincronizandoUsuario]);
+  }, [sincronizandoUsuario, session]);
 
   const ticketsFiltrados = useMemo(() => {
     return tickets.filter(t => {
