@@ -216,16 +216,32 @@ export default function Map({
         const catName = (t.categoria?.nombre || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
         const desc = (t.descripcionUsuario || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
         const textoClave = `${catName} ${desc}`;
-        
-        let claseMarcador = '';
-        if (textoClave.includes('vehiculo') || textoClave.includes('auto')) claseMarcador = 'auto-abandonado';
-        else if (textoClave.includes('basura') || textoClave.includes('escombro') || textoClave.includes('microbasural')) claseMarcador = 'basura';
-        else if (textoClave.includes('alumbrado') || textoClave.includes('luz') || textoClave.includes('poste')) claseMarcador = 'alumbrado';
-        else if (textoClave.includes('ruido') || textoClave.includes('fiesta') || textoClave.includes('musica')) claseMarcador = 'ruidos';
-        else if (textoClave.includes('bache') || textoClave.includes('hoyo') || textoClave.includes('vial')) claseMarcador = 'bache';
-        else if (textoClave.includes('animal') || textoClave.includes('perro') || textoClave.includes('vaca')) claseMarcador = 'animales';
-        else if (textoClave.includes('senal') || textoClave.includes('transito') || textoClave.includes('pare')) claseMarcador = 'senaletica';
-        else if (textoClave.includes('verde') || textoClave.includes('riego') || textoClave.includes('arbol') || textoClave.includes('plaza')) claseMarcador = 'plaza';
+
+        // 1) La categoría manda: un ticket de "Animales" que menciona basura sigue siendo Animales.
+        const ICONO_POR_CATEGORIA: Record<string, string> = {
+          'bache / vialidad': 'bache',
+          'basura / microbasural': 'basura',
+          'alumbrado publico': 'alumbrado',
+          'vehiculo abandonado': 'auto-abandonado',
+          'ruidos molestos': 'ruidos',
+          'senaletica / transito': 'senaletica',
+          'areas verdes': 'plaza',
+          'animales': 'animales',
+        };
+
+        let claseMarcador = ICONO_POR_CATEGORIA[catName] || '';
+
+        // 2) Solo si la categoría no se reconoce (p. ej. "Otro"), se intenta por palabras clave.
+        if (!claseMarcador) {
+          if (textoClave.includes('vehiculo') || textoClave.includes('auto')) claseMarcador = 'auto-abandonado';
+          else if (textoClave.includes('basura') || textoClave.includes('escombro') || textoClave.includes('microbasural')) claseMarcador = 'basura';
+          else if (textoClave.includes('alumbrado') || textoClave.includes('luz') || textoClave.includes('poste')) claseMarcador = 'alumbrado';
+          else if (textoClave.includes('ruido') || textoClave.includes('fiesta') || textoClave.includes('musica')) claseMarcador = 'ruidos';
+          else if (textoClave.includes('bache') || textoClave.includes('hoyo') || textoClave.includes('vial')) claseMarcador = 'bache';
+          else if (textoClave.includes('animal') || textoClave.includes('perro') || textoClave.includes('vaca')) claseMarcador = 'animales';
+          else if (textoClave.includes('senal') || textoClave.includes('transito') || textoClave.includes('pare')) claseMarcador = 'senaletica';
+          else if (textoClave.includes('verde') || textoClave.includes('riego') || textoClave.includes('arbol') || textoClave.includes('plaza')) claseMarcador = 'plaza';
+        }
 
         if (claseMarcador) {
           const customMarkerContainer = document.createElement('div');
@@ -366,27 +382,17 @@ export default function Map({
         .marcador-img.bache { background-image: url('/marcadores/bache-estatico.png'); }
         .marcador-img.bache:hover, .marcador-img.bache.activo { background-image: url('/marcadores/bache.gif'); }
 
-        /* ========================================= */
-        /* ICONOS EN RESERVA (Aún sin diseño final)  */
-        /* ========================================= */
-        
-        /* 6. ANIMALES SUELTOS */
-        /*
+        /* 6. ANIMALES SUELTOS (Seguridad Pública) */
         .marcador-img.animales { background-image: url('/marcadores/animal-estatico.png'); }
         .marcador-img.animales:hover, .marcador-img.animales.activo { background-image: url('/marcadores/animal.gif'); }
-        */
 
-        /* 7. SEÑALÉTICA */
-        /*
+        /* 7. SEÑALÉTICA / TRÁNSITO (Tránsito) */
         .marcador-img.senaletica { background-image: url('/marcadores/senalitica-estatico.png'); }
         .marcador-img.senaletica:hover, .marcador-img.senaletica.activo { background-image: url('/marcadores/senalitica.gif'); }
-        */
 
-        /* 8. ÁREAS VERDES / PLAZAS */
-        /*
+        /* 8. ÁREAS VERDES / PLAZAS (Aseo y Ornato) */
         .marcador-img.plaza { background-image: url('/marcadores/plaza-estatico.png'); }
         .marcador-img.plaza:hover, .marcador-img.plaza.activo { background-image: url('/marcadores/plaza.gif'); }
-        */
 
         @keyframes pulse {
           0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
