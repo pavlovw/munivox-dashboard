@@ -43,6 +43,16 @@ interface Ticket {
   historial?: any[];
 }
 
+// Traduce el nombre guardado en la BD al valor de las opciones del selector de derivación
+function valorSelectDesdeNombre(nombre?: string): string {
+  const n = (nombre || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  if (n.includes('ASEO') || n.includes('DIMAO')) return 'ASEO Y ORNATO';
+  if (n.includes('TRANSITO')) return 'TRANSITO';
+  if (n.includes('SEGURIDAD')) return 'SEGURIDAD PÚBLICA';
+  if (n.includes('OBRAS')) return 'OBRAS MUNICIPALES';
+  return 'SIN ASIGNAR';
+}
+
 export default function Dashboard() {
   const { data: session, status } = useSession(); 
   const router = useRouter();
@@ -115,7 +125,11 @@ export default function Dashboard() {
   const fetchTickets = async () => {
     try {
       const res = await api(`${API_GATEWAY_URL}/tickets`);
-      if (res.ok) setTickets(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        // Solo actualiza si hubo cambios: evita redibujar el mapa en cada ciclo de refresco
+        setTickets(prev => JSON.stringify(prev) === JSON.stringify(data) ? prev : data);
+      }
     } catch (error) { 
       console.error(error); 
     } finally { 
@@ -126,6 +140,8 @@ export default function Dashboard() {
   useEffect(() => {
     if (!sincronizandoUsuario) {
       fetchTickets();
+      // Respaldo: refresca cada 10 s por si el socket no entrega el evento (o el cambio lo hizo otro usuario)
+      const intervaloTickets = setInterval(fetchTickets, 10000);
       
       const socket = io("https://socket-service.politeplant-263a4d5b.eastus.azurecontainerapps.io", { 
         transports: ['websocket', 'polling'],
@@ -135,12 +151,14 @@ export default function Dashboard() {
       });
 
       // CORRECCIÓN AQUÍ: Escuchar exactamente el mismo evento que emite el servidor
+      socket.on('connect_error', (err) => console.error('Socket C4 no conectó:', err.message));
+
       socket.on('ticket-actualizado', (nuevoTicket) => {
         console.log("¡Actualización recibida en tiempo real!", nuevoTicket);
         fetchTickets(); // Esto recargará los tickets sin presionar F5
       });
 
-      return () => { socket.disconnect(); };
+      return () => { clearInterval(intervaloTickets); socket.disconnect(); };
     }
   }, [sincronizandoUsuario, session]);
 
@@ -166,7 +184,7 @@ export default function Dashboard() {
         }
 
         setTicketSeleccionado(detalle);
-        setDepartamentoDerivacion(detalle.departamento?.nombre || "SIN ASIGNAR");
+        setDepartamentoDerivacion(valorSelectDesdeNombre(detalle.departamento?.nombre));
         
         if (lat && lng) {
           setCoordenadaEnfoque([lat, lng]);
@@ -579,7 +597,7 @@ export default function Dashboard() {
                             🤖 RECOMENDACIÓN IA:
                           </span>
                           <span style={{ fontSize: '11px', fontWeight: 900, color: '#1d4ed8', backgroundColor: '#dbeafe', padding: '4px 10px', borderRadius: '8px' }}>
-                            {ticketSeleccionado.departamento?.nombre || ticketSeleccionado.categoria?.nombre || "SEGURIDAD PÚBLICA"}
+                            {ticketSeleccionado.departamento?.nombre || "Sin recomendación"}
                           </span>
                         </div>
 
@@ -591,10 +609,9 @@ export default function Dashboard() {
                           >
                             <option value="SIN ASIGNAR">-- SIN ASIGNAR DEPARTAMENTO --</option>
                             <option value="SEGURIDAD PÚBLICA">Derivar a: SEGURIDAD PÚBLICA</option>
-                            <option value="DIMAO">Derivar a: DIMAO (Aseo y Ornato)</option>
-                            <option value="TRÁNSITO">Derivar a: DIRECCIÓN DE TRÁNSITO</option>
-                            <option value="DOM">Derivar a: OBRAS MUNICIPALES (DOM)</option>
-                            <option value="DIDECO">Derivar a: DIDECO</option>
+                            <option value="ASEO Y ORNATO">Derivar a: ASEO Y ORNATO (DIMAO)</option>
+                            <option value="TRANSITO">Derivar a: DIRECCIÓN DE TRÁNSITO</option>
+                            <option value="OBRAS MUNICIPALES">Derivar a: OBRAS MUNICIPALES (DOM)</option>
                           </select>
                           
                           <button 

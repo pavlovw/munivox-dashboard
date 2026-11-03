@@ -48,23 +48,25 @@ export default function Kanban({ tickets, onTicketSelect, onEstadoChange }: Kanb
     { id: 'RESUELTO', titulo: 'Resueltos / Cerrados', color: '#059669', bg: '#ecfdf5', border: '#a7f3d0', icon: <FiCheckCircle /> }
   ];
 
+  // Convierte el nombre del departamento (texto u objeto {nombre}) en una clave estable
+  const getDeptoKey = (depto: any): string => {
+    const nombre = typeof depto === 'string' ? depto : depto?.nombre || '';
+    const n = nombre.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+    if (n.includes('ASEO') || n.includes('DIMAO')) return 'ASEO';
+    if (n.includes('TRANSITO')) return 'TRANSITO';
+    if (n.includes('SEGURIDAD')) return 'SEGURIDAD';
+    if (n.includes('OBRAS') || n === 'DOM') return 'OBRAS';
+    return '';
+  };
+
   // Estilos visuales por Departamento
-  const getDeptoBadge = (depto?: string) => {
-    switch (depto?.toUpperCase()) {
-      case 'SEGURIDAD PÚBLICA':
-      case 'SEGURIDAD':
-        return { bg: '#1e3a8a', text: '#ffffff', label: 'Seguridad' };
-      case 'DIMAO':
-        return { bg: '#047857', text: '#ffffff', label: 'DIMAO' };
-      case 'DOM':
-        return { bg: '#c2410c', text: '#ffffff', label: 'DOM' };
-      case 'TRÁNSITO':
-      case 'TRANSITO':
-        return { bg: '#6d28d9', text: '#ffffff', label: 'Tránsito' };
-      case 'DIDECO':
-        return { bg: '#be185d', text: '#ffffff', label: 'DIDECO' };
-      default:
-        return { bg: '#475569', text: '#ffffff', label: depto || 'Sin Asignar' };
+  const getDeptoBadge = (depto: any) => {
+    switch (getDeptoKey(depto)) {
+      case 'SEGURIDAD': return { bg: '#1e3a8a', text: '#ffffff', label: 'Seguridad' };
+      case 'ASEO':      return { bg: '#047857', text: '#ffffff', label: 'Aseo y Ornato' };
+      case 'TRANSITO':  return { bg: '#6d28d9', text: '#ffffff', label: 'Tránsito' };
+      case 'OBRAS':     return { bg: '#c2410c', text: '#ffffff', label: 'Obras' };
+      default:          return { bg: '#475569', text: '#ffffff', label: 'Sin Asignar' };
     }
   };
 
@@ -95,18 +97,24 @@ export default function Kanban({ tickets, onTicketSelect, onEstadoChange }: Kanb
     return `Hace ${Math.floor(diffHoras / 24)}d`;
   };
 
-  // Filtrado de tickets
+  // Filtrado de tickets (los campos de la BD pueden venir null: nunca llamar métodos sobre ellos directo)
   const ticketsFiltrados = useMemo(() => {
-    return tickets.filter(t => {
-      const cumpleBusqueda = 
-        t.codigoTicket.toLowerCase().includes(busqueda.toLowerCase()) ||
-        t.analisisIA.toLowerCase().includes(busqueda.toLowerCase()) ||
-        (t.direccion && t.direccion.toLowerCase().includes(busqueda.toLowerCase()));
-
-      const cumpleDepto = deptoFiltro === 'TODOS' || t.departamento?.toUpperCase() === deptoFiltro.toUpperCase();
-
-      return cumpleBusqueda && cumpleDepto;
-    });
+    const q = busqueda.toLowerCase();
+    return tickets
+      .map(t => ({
+        ...t,
+        analisisIA: t.analisisIA || t.descripcionUsuario || '',
+        direccion: t.direccion || '',
+        tieneImagenes: t.tieneImagenes || (t.evidencias?.length ?? 0) > 0,
+      }))
+      .filter(t => {
+        const cumpleBusqueda =
+          String(t.codigoTicket ?? '').toLowerCase().includes(q) ||
+          t.analisisIA.toLowerCase().includes(q) ||
+          t.direccion.toLowerCase().includes(q);
+        const cumpleDepto = deptoFiltro === 'TODOS' || getDeptoKey(t.departamento) === deptoFiltro;
+        return cumpleBusqueda && cumpleDepto;
+      });
   }, [tickets, busqueda, deptoFiltro]);
 
   // Manejo de Drag & Drop
@@ -159,7 +167,7 @@ export default function Kanban({ tickets, onTicketSelect, onEstadoChange }: Kanb
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <FiFilter style={{ color: '#64748b', fontSize: '14px' }} />
           <span style={{ fontSize: '12px', fontWeight: 700, color: '#475569' }}>Departamento:</span>
-          {['TODOS', 'SEGURIDAD PÚBLICA', 'DIMAO', 'DOM', 'TRÁNSITO', 'DIDECO'].map(dept => (
+          {['TODOS', 'SEGURIDAD', 'ASEO', 'TRANSITO', 'OBRAS'].map(dept => (
             <button
               key={dept}
               onClick={() => setDeptoFiltro(dept)}
@@ -176,7 +184,7 @@ export default function Kanban({ tickets, onTicketSelect, onEstadoChange }: Kanb
                 transition: 'all 0.15s ease'
               }}
             >
-              {dept === 'TODOS' ? 'Todos' : dept.replace('SEGURIDAD PÚBLICA', 'Seguridad')}
+              {({ TODOS: 'Todos', SEGURIDAD: 'Seguridad', ASEO: 'Aseo y Ornato', TRANSITO: 'Tránsito', OBRAS: 'Obras' } as Record<string, string>)[dept]}
             </button>
           ))}
         </div>
