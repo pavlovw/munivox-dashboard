@@ -5,13 +5,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { signOut } from "next-auth/react";
 import {
   FiMap, FiColumns, FiBarChart2, FiSettings, FiLogOut, FiSearch, FiVolume2, FiVolumeX, FiSend,
-  FiEdit3, FiSlash, FiRotateCcw, FiInbox, FiAlertTriangle, FiCpu, FiBell, FiX, FiLink,
+  FiEdit3, FiSlash, FiRotateCcw, FiInbox, FiAlertTriangle, FiCpu, FiBell, FiX, FiLink, FiTruck, FiTarget, FiClipboard, FiBookOpen,
 } from "react-icons/fi";
 import MensajeVecino from "../components/MensajeVecino";
 
 import Kanban from "../components/Kanban";
 import Estadisticas from "../components/Estadisticas";
 import AdminPanel from "../components/AdminPanel";
+import EquiposTerreno from "../components/EquiposTerreno";
+import PuntosCriticos from "../components/PuntosCriticos";
+import InformeTurno from "../components/InformeTurno";
+import Protocolos from "../components/Protocolos";
 import DetalleTicket from "../components/DetalleTicket";
 import { Logo, PantallaCarga, IndicadorConexion, InsigniaEstado, IndicadorSla, Esqueleto, Vacio, Modal, Kpi } from "../components/ui/Comunes";
 import { Icono } from "../components/ui/Iconos";
@@ -33,7 +37,7 @@ const Mapa = dynamic(() => import("../components/Map"), {
   loading: () => <div className="esqueleto" style={{ width: "100%", height: "100%" }} />,
 });
 
-type Vista = "OPERACIONES" | "KANBAN" | "ESTADISTICAS" | "ADMINISTRACION";
+type Vista = "OPERACIONES" | "KANBAN" | "EQUIPOS" | "ESTADISTICAS" | "PUNTOS" | "INFORME" | "ADMINISTRACION" | "PROTOCOLOS";
 
 const MOTIVOS_DESCARTE = [
   "Duplicado de otro reporte",
@@ -313,37 +317,56 @@ export default function CentralC4() {
   }
   if (!perfil) return <PantallaCarga />;
 
-  const navegacion: { id: Vista; etiqueta: string; icono: React.ReactNode; contador?: number }[] = [
-    { id: "OPERACIONES", etiqueta: "Operaciones", icono: <FiMap size={16} />, contador: metricas.pendientes },
-    { id: "KANBAN", etiqueta: "Flujo de casos", icono: <FiColumns size={16} /> },
-    { id: "ESTADISTICAS", etiqueta: "Estadísticas", icono: <FiBarChart2 size={16} /> },
-    { id: "ADMINISTRACION", etiqueta: "Administración", icono: <FiSettings size={16} /> },
+  const grupos: { titulo: string; items: { id: Vista; etiqueta: string; icono: React.ReactNode; contador?: number }[] }[] = [
+    { titulo: "Centro de mando", items: [
+      { id: "OPERACIONES", etiqueta: "Operaciones", icono: <FiMap size={16} />, contador: metricas.pendientes },
+      { id: "KANBAN", etiqueta: "Flujo de casos", icono: <FiColumns size={16} /> },
+      { id: "EQUIPOS", etiqueta: "Equipos en terreno", icono: <FiTruck size={16} /> },
+    ] },
+    { titulo: "Análisis", items: [
+      { id: "ESTADISTICAS", etiqueta: "Estadísticas", icono: <FiBarChart2 size={16} /> },
+      { id: "PUNTOS", etiqueta: "Puntos críticos", icono: <FiTarget size={16} /> },
+      { id: "INFORME", etiqueta: "Informe del turno", icono: <FiClipboard size={16} /> },
+    ] },
+    { titulo: "Gestión", items: [
+      { id: "ADMINISTRACION", etiqueta: "Administración", icono: <FiSettings size={16} /> },
+      { id: "PROTOCOLOS", etiqueta: "Protocolos y ayuda", icono: <FiBookOpen size={16} /> },
+    ] },
   ];
   const titulos: Record<Vista, [string, string]> = {
     OPERACIONES: ["Operaciones en tiempo real", "Mapa y bandeja de reportes de la comuna"],
     KANBAN: ["Flujo de casos", "Estado de todos los reportes, del ingreso al cierre"],
+    EQUIPOS: ["Equipos en terreno", "Dónde está cada funcionario, quién está libre y quién atiende un caso"],
     ESTADISTICAS: ["Estadísticas e informes", "Indicadores de gestión, plazos y satisfacción"],
-    ADMINISTRACION: ["Administración", "Personal, departamentos y vecinos"],
+    PUNTOS: ["Puntos críticos y prevención", "Lugares donde los problemas se repiten y proyección de demanda"],
+    INFORME: ["Informe del turno", "Resumen para entregar el turno al siguiente operador"],
+    ADMINISTRACION: ["Administración", "Personal, departamentos, vecinos y datos personales"],
+    PROTOCOLOS: ["Protocolos y ayuda", "Guía de trabajo: flujo, prioridades, fichas por tipo de problema y buenas prácticas"],
   };
+  const abrirTicket = (id: string) => { setVista("OPERACIONES"); seleccionar(id); };
 
   const recomendado = detalle ? categoriaInfo(detalle.categoria?.nombre).departamentoId : null;
   const cerrado = detalle && ["RESUELTO", "DESCARTADO"].includes(detalle.estado);
 
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
+    <div className="raiz-app" style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
       {/* =================== NAVEGACIÓN =================== */}
-      <aside style={{ width: 236, background: "var(--marino)", color: "#fff", display: "flex", flexDirection: "column", flexShrink: 0, borderRight: "1px solid var(--marino-borde)" }}>
+      <aside className="no-imprimir" style={{ width: 236, background: "var(--marino)", color: "#fff", display: "flex", flexDirection: "column", flexShrink: 0, borderRight: "1px solid var(--marino-borde)" }}>
         <div style={{ padding: "18px 18px 16px", borderBottom: "1px solid var(--marino-borde)" }}>
           <Logo subtitulo="Central C4 | Buin" />
         </div>
-        <nav style={{ padding: "12px 0", flex: 1 }}>
-          <div className="rotulo" style={{ padding: "6px 18px 8px", color: "#5D6F92" }}>Centro de mando</div>
-          {navegacion.map((n, i) => (
-            <button key={n.id} className={`nav-item anim-izquierda${vista === n.id ? " activo" : ""}`} style={{ animationDelay: `${i * 50}ms` }} onClick={() => setVista(n.id)}>
-              {n.icono}
-              <span className="crece">{n.etiqueta}</span>
-              {!!n.contador && <span className="mono" style={{ background: "var(--alerta)", color: "#fff", fontSize: 10.5, fontWeight: 600, padding: "1px 6px" }}>{n.contador}</span>}
-            </button>
+        <nav className="desplazable" style={{ padding: "12px 0", flex: 1 }}>
+          {grupos.map((g, gi) => (
+            <div key={g.titulo}>
+              <div className="rotulo" style={{ padding: `${gi ? 16 : 6}px 18px 6px`, color: "#5D6F92" }}>{g.titulo}</div>
+              {g.items.map((n, i) => (
+                <button key={n.id} className={`nav-item anim-izquierda${vista === n.id ? " activo" : ""}`} style={{ animationDelay: `${(gi * 3 + i) * 45}ms`, padding: "9px 16px" }} onClick={() => setVista(n.id)}>
+                  {n.icono}
+                  <span className="crece">{n.etiqueta}</span>
+                  {!!n.contador && <span className="mono" style={{ background: "var(--alerta)", color: "#fff", fontSize: 10.5, fontWeight: 600, padding: "1px 6px" }}>{n.contador}</span>}
+                </button>
+              ))}
+            </div>
           ))}
 
           <div className="rotulo" style={{ padding: "22px 18px 8px", color: "#5D6F92" }}>Estado de la comuna</div>
@@ -387,7 +410,7 @@ export default function CentralC4() {
 
       {/* =================== CONTENIDO =================== */}
       <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <header style={{ height: 60, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "0 20px", background: "var(--superficie)", borderBottom: "1px solid var(--borde)", position: "relative" }}>
+        <header className="no-imprimir" style={{ height: 60, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "0 20px", background: "var(--superficie)", borderBottom: "1px solid var(--borde)", position: "relative" }}>
           <div key={vista} className="anim-arriba" style={{ minWidth: 0 }}>
             <h1 className="titulo-2">{titulos[vista][0]}</h1>
             <div className="texto-3" style={{ fontSize: 11.5 }}>{titulos[vista][1]}</div>
@@ -640,6 +663,30 @@ export default function CentralC4() {
           {vista === "ADMINISTRACION" && (
             <div className="anim-aparecer" style={{ flex: 1, minHeight: 0 }}>
               <AdminPanel tickets={tickets} ahora={ahora} miId={perfil.id} />
+            </div>
+          )}
+
+          {vista === "EQUIPOS" && (
+            <div className="anim-aparecer" style={{ flex: 1, minHeight: 0 }}>
+              <EquiposTerreno tickets={tickets} ahora={ahora} onAbrirTicket={abrirTicket} />
+            </div>
+          )}
+
+          {vista === "PUNTOS" && (
+            <div className="anim-aparecer" style={{ flex: 1, minHeight: 0 }}>
+              <PuntosCriticos tickets={tickets} ahora={ahora} onAbrirTicket={abrirTicket} />
+            </div>
+          )}
+
+          {vista === "INFORME" && (
+            <div className="anim-aparecer imprimible" style={{ flex: 1, minHeight: 0 }}>
+              <InformeTurno tickets={tickets} ahora={ahora} operador={perfil.nombre} />
+            </div>
+          )}
+
+          {vista === "PROTOCOLOS" && (
+            <div className="anim-aparecer" style={{ flex: 1, minHeight: 0 }}>
+              <Protocolos />
             </div>
           )}
         </div>

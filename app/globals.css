@@ -595,3 +595,20 @@ a { color: var(--acento); }
     transition-duration: 1ms !important;
   }
 }
+
+/* ==========================================================================
+   IMPRESIÓN (Informe del turno y Estadísticas)
+   ========================================================================== */
+.solo-imprimir { display: none; }
+@media print {
+  @page { size: A4; margin: 12mm; }
+  body { background: #fff; font-size: 11px; }
+  .no-imprimir { display: none !important; }
+  .solo-imprimir { display: block !important; }
+  .raiz-app, .raiz-app main, .raiz-app main > div, .imprimible, .desplazable {
+    display: block !important; height: auto !important; min-height: 0 !important; overflow: visible !important;
+  }
+  .panel, .kpi { box-shadow: none !important; break-inside: avoid; }
+  .anim-arriba, .anim-aparecer, .kpi::after, .barra > span { animation: none !important; opacity: 1 !important; transform: none !important; }
+  .avisos { display: none !important; }
+}
