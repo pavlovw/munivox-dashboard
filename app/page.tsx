@@ -406,6 +406,25 @@ export default function CentralC4() {
                             <>
                               <div>
                                 <div className="fila entre" style={{ marginBottom: 6 }}>
+                                  <span className="rotulo">Categoría</span>
+                                  {!detalle.categoria && <span className="fila" style={{ gap: 4, fontSize: 10.5, color: "var(--alerta)", fontWeight: 600 }}><FiAlertTriangle size={11} /> La IA no la reconoció</span>}
+                                </div>
+                                <select className="select" disabled={procesando}
+                                  value={detalle.categoria ? categoriaInfo(detalle.categoria.nombre).nombre : ""}
+                                  style={{ borderLeft: `4px solid ${detalle.categoria ? categoriaInfo(detalle.categoria.nombre).color : "var(--alerta)"}` }}
+                                  onChange={async e => {
+                                    const nombre = e.target.value;
+                                    if (!nombre) return;
+                                    const ok = await actualizar({ categoriaNombre: nombre }, `Categoría: ${nombre}`);
+                                    const sugerido = categoriaInfo(nombre).departamentoId;
+                                    if (ok && sugerido && !detalle.departamentoId) setDeptoDestino(sugerido);
+                                  }}>
+                                  <option value="" disabled>Seleccionar categoría</option>
+                                  {CATEGORIAS.map(c => <option key={c.nombre} value={c.nombre}>{c.nombre}</option>)}
+                                </select>
+                              </div>
+                              <div>
+                                <div className="fila entre" style={{ marginBottom: 6 }}>
                                   <span className="rotulo">Derivar a departamento</span>
                                   {recomendado && <span className="fila" style={{ gap: 4, fontSize: 10.5, color: "var(--acento)", fontWeight: 600 }}><FiCpu size={11} /> IA sugiere {departamentoInfo(recomendado)?.corto}</span>}
                                 </div>

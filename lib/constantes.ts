@@ -65,9 +65,25 @@ export const CATEGORIAS: { nombre: string; icono: IconoCategoria; color: string;
   { nombre: "Otro",                  icono: "otro",       color: "#5C677D", departamentoId: null },
 ];
 
+// Para nombres antiguos guardados en la base (por ejemplo "Bache, socavón o daño vial")
+const PALABRAS_CATEGORIA: [number, string[]][] = [
+  [5, ["senal", "semaforo"]],
+  [0, ["bache", "socavon", "vialidad"]],
+  [1, ["basura", "microbasural", "escombro"]],
+  [2, ["alumbrado", "luminaria"]],
+  [3, ["vehiculo"]],
+  [4, ["ruido", "fiesta"]],
+  [6, ["area verde", "plaza", "riego", "arbol"]],
+  [7, ["animal", "perro"]],
+];
+
 export function categoriaInfo(nombre?: string | null) {
   const n = normalizar(nombre);
-  return CATEGORIAS.find(c => normalizar(c.nombre) === n) || { ...CATEGORIAS[8], nombre: nombre || "Sin clasificar" };
+  const exacta = CATEGORIAS.find(c => normalizar(c.nombre) === n);
+  if (exacta) return exacta;
+  const parecida = n ? PALABRAS_CATEGORIA.find(([, ps]) => ps.some(p => n.includes(p))) : undefined;
+  if (parecida) return CATEGORIAS[parecida[0]];
+  return { ...CATEGORIAS[8], nombre: nombre || "Sin clasificar" };
 }
 
 // ============================================================================
