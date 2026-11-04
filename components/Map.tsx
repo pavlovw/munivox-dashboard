@@ -1,435 +1,400 @@
 "use client";
 
-import React, { useRef, useEffect, useState } from 'react';
-import mapboxgl from 'mapbox-gl';
-import 'mapbox-gl/dist/mapbox-gl.css';
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
+import { FiLayers, FiCrosshair, FiChevronDown, FiChevronUp } from "react-icons/fi";
 
-import buinBoundary from '../data/buin-boundary.json';
+import type { Ticket, Operador } from "../lib/tipos";
+import { categoriaInfo, CATEGORIAS, ESTADOS, prioridadDe, slaDe, tiempoRelativo, ESTADOS_ACTIVOS } from "../lib/constantes";
+import { LIMITE_BUIN, UNIDADES_VECINALES, CENTRO_BUIN } from "../lib/geo";
+import { svgIcono } from "./ui/Iconos";
+import { useUltimo } from "../lib/hooks";
 
-import uvBuinCentro from '../data/unidades-vecinales/unidad-vecinal-3.json';
-import uvBuinPoniente from '../data/unidades-vecinales/unidad-vecinal-1.json';
-import uvBuinNorte from '../data/unidades-vecinales/unidad-vecinal-16.json';
-import uvBuinOriente from '../data/unidades-vecinales/unidad-vecinal-12.json';
-import uvBuinSur from '../data/unidades-vecinales/unidad-vecinal-9.json';
-import uvNuevoBuin from '../data/unidades-vecinales/unidad-vecinal-19.json';
-import uvMaipo from '../data/unidades-vecinales/unidad-vecinal-5.json';
-import uvAltoJahuel from '../data/unidades-vecinales/unidad-vecinal-10.json';
-import uvLinderos from '../data/unidades-vecinales/unidad-vecinal-7.json';
-import uvViluco from '../data/unidades-vecinales/unidad-vecinal-17.json';
-import uvValdiviaDePaine from '../data/unidades-vecinales/unidad-vecinal-18.json';
-import uvCervera from '../data/unidades-vecinales/unidad-vecinal-15.json';
-import uvLaEstancilla from '../data/unidades-vecinales/unidad-vecinal-14.json';
-import uvNuevoLinderos from '../data/unidades-vecinales/unidad-vecinal-2.json';
-import uvFlorDeMaipo from '../data/unidades-vecinales/unidad-vecinal-13.json';
-import uvLosGuindos from '../data/unidades-vecinales/unidad-vecinal-8.json';
-import uvElRecurso from '../data/unidades-vecinales/unidad-vecinal-11.json';
-import uvRuralNorte from '../data/unidades-vecinales/unidad-vecinal-6.json';
-import uvElCerrillo from '../data/unidades-vecinales/unidad-vecinal-4.json';
-
-const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || 'pk.eyJ1IjoicGF2bG92dyIsImEiOiJcmx...';
-
-const UNIDADES_VECINALES = [
-  { id: 'TODAS', nombre: 'Ver toda la comuna', data: null },
-  { id: '1', nombre: '1. BUIN CENTRO', data: uvBuinCentro },
-  { id: '2', nombre: '2. BUIN PONIENTE', data: uvBuinPoniente },
-  { id: '3', nombre: '3. BUIN NORTE', data: uvBuinNorte },
-  { id: '4', nombre: '4. BUIN ORIENTE', data: uvBuinOriente },
-  { id: '5', nombre: '5. BUIN SUR', data: uvBuinSur },
-  { id: '6', nombre: '6. NUEVO BUIN', data: uvNuevoBuin },
-  { id: '7', nombre: '7. MAIPO', data: uvMaipo },
-  { id: '8', nombre: '8. ALTO JAHUEL', data: uvAltoJahuel },
-  { id: '9', nombre: '9. LINDEROS', data: uvLinderos },
-  { id: '10', nombre: '10. VILUCO', data: uvViluco },
-  { id: '11', nombre: '11. VALDIVIA DE PAINE', data: uvValdiviaDePaine },
-  { id: '12', nombre: '12. CERVERA', data: uvCervera },
-  { id: '13', nombre: '13. LA ESTANCILLA', data: uvLaEstancilla },
-  { id: '14', nombre: '14. NUEVO LINDEROS', data: uvNuevoLinderos },
-  { id: '15', nombre: '15. FLOR DE MAIPO', data: uvFlorDeMaipo },
-  { id: '16', nombre: '16. LOS GUINDOS', data: uvLosGuindos },
-  { id: '17', nombre: '17. EL RECURSO', data: uvElRecurso },
-  { id: '18', nombre: '18. RURAL NORTE', data: uvRuralNorte },
-  { id: '19', nombre: '19. EL CERRILLO', data: uvElCerrillo },
-];
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
 
 interface MapProps {
-  tickets: any[];
-  fantasmas?: any[];
-  coordenadaSeleccionada?: [number, number] | null;
-  onTicketSelect: (id: string) => void;
-  usarIconos3D?: boolean; // Propiedad para activar los iconos 2.5D animados
+  tickets: Ticket[];
+  onSeleccionar?: (id: string) => void;
+  seleccionadoId?: string | null;
+  enfoque?: [number, number] | null; // [lat, lng]
+  cercanos?: Ticket[];
+  funcionarios?: Operador[];
+  lineaDespacho?: { desde: [number, number]; hasta: [number, number] } | null; // [lat, lng]
+  compacto?: boolean;
+  zoomEnfoque?: number;
 }
 
-export default function Map({ 
-  tickets, 
-  fantasmas = [], 
-  coordenadaSeleccionada, 
-  onTicketSelect, 
-  usarIconos3D = true // 👈 CORREGIDO: Por defecto activado en TRUE
+const escapar = (s: string) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+
+export default function Mapa({
+  tickets, onSeleccionar, seleccionadoId, enfoque, cercanos = [], funcionarios = [], lineaDespacho, compacto = false, zoomEnfoque = 16,
 }: MapProps) {
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const contenedor = useRef<HTMLDivElement>(null);
+  const mapaRef = useRef<mapboxgl.Map | null>(null);
+  const marcadores = useRef(new Map<string, { marker: mapboxgl.Marker; el: HTMLDivElement; firma: string }>());
+  const primeraCarga = useRef(true);
+  const onSeleccionarRef = useUltimo(onSeleccionar);
 
-  const [uvSeleccionadaId, setUvSeleccionadaId] = useState<string>('TODAS');
-  const [mostrarBordesUV, setMostrarBordesUV] = useState<boolean>(false);
-  const [esModo3D, setEsModo3D] = useState<boolean>(false);
+  const [listo, setListo] = useState(false);
+  const [uvId, setUvId] = useState("TODAS");
+  const [bordesUV, setBordesUV] = useState(false);
+  const [calor, setCalor] = useState(false);
+  const [modo3D, setModo3D] = useState(false);
+  const [leyendaAbierta, setLeyendaAbierta] = useState(!compacto);
 
-  const uvActual = UNIDADES_VECINALES.find(uv => uv.id === uvSeleccionadaId);
-
-  // Inicialización del Mapa
+  // --------------------------------------------------------------------------
+  // INICIALIZACIÓN
+  // --------------------------------------------------------------------------
   useEffect(() => {
-    if (!mapContainerRef.current) return;
-
+    if (!contenedor.current) return;
     mapboxgl.accessToken = MAPBOX_TOKEN;
 
-    const map = new mapboxgl.Map({
-      container: mapContainerRef.current,
-      style: 'mapbox://styles/mapbox/light-v11',
-      center: [-70.7415, -33.7312],
-      zoom: 13,
-      pitch: 0,
-      bearing: 0,
+    const mapa = new mapboxgl.Map({
+      container: contenedor.current,
+      style: "mapbox://styles/mapbox/light-v11",
+      center: CENTRO_BUIN,
+      zoom: compacto ? 15 : 12.6,
+      attributionControl: !compacto,
     });
+    mapaRef.current = mapa;
+    if (!compacto) mapa.addControl(new mapboxgl.NavigationControl({ showCompass: true }), "bottom-right");
 
-    mapRef.current = map;
+    mapa.on("load", () => {
+      const capas = mapa.getStyle().layers || [];
+      const capaEtiquetas = capas.find(l => l.type === "symbol" && (l.layout as any)?.["text-field"])?.id;
 
-    map.on('load', () => {
-      const layers = map.getStyle().layers;
-      const labelLayerId = layers?.find(layer => layer.type === 'symbol' && layer.layout?.['text-field'])?.id;
-
-      layers?.forEach(layer => {
-        if (layer.type === 'background') map.setPaintProperty(layer.id, 'background-color', '#cbd5e1');
-        if (layer.id.includes('landuse') || layer.id.includes('landcover')) map.setPaintProperty(layer.id, 'fill-color', '#cbd5e1');
-        if (layer.id.includes('road') && layer.type === 'line') map.setPaintProperty(layer.id, 'line-color', '#ffffff');
+      capas.forEach(l => {
+        try {
+          if (l.type === "background") mapa.setPaintProperty(l.id, "background-color", "#E4E8EE");
+          if ((l.id.includes("landuse") || l.id.includes("landcover")) && l.type === "fill") mapa.setPaintProperty(l.id, "fill-color", "#DDE3EA");
+          if (l.id.includes("water") && l.type === "fill") mapa.setPaintProperty(l.id, "fill-color", "#BFD3EA");
+          if (l.id.includes("road") && l.type === "line") mapa.setPaintProperty(l.id, "line-color", "#FFFFFF");
+        } catch {}
       });
 
-      map.addLayer(
-        {
-          id: 'edificios-3d',
-          source: 'composite',
-          'source-layer': 'building',
-          filter: ['==', 'extrude', 'true'],
-          type: 'fill-extrusion',
-          minzoom: 14,
-          paint: {
-            'fill-extrusion-color': '#38bdf8',
-            'fill-extrusion-height': ['get', 'height'],
-            'fill-extrusion-base': ['get', 'min_height'],
-            'fill-extrusion-opacity': 0.7,
-          },
+      mapa.addLayer({
+        id: "edificios-3d", source: "composite", "source-layer": "building", filter: ["==", "extrude", "true"], type: "fill-extrusion", minzoom: 14,
+        paint: { "fill-extrusion-color": "#B9C6DA", "fill-extrusion-height": ["get", "height"], "fill-extrusion-base": ["get", "min_height"], "fill-extrusion-opacity": 0.75 },
+      }, capaEtiquetas);
+
+      // Máscara fuera de la comuna y límite comunal
+      const mundo = [[-180, -90], [180, -90], [180, 90], [-180, 90], [-180, -90]];
+      mapa.addSource("mascara", { type: "geojson", data: { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [mundo, LIMITE_BUIN.geometry.coordinates[0]] } } as any });
+      mapa.addLayer({ id: "mascara", type: "fill", source: "mascara", paint: { "fill-color": "#0A1222", "fill-opacity": 0.22 } }, capaEtiquetas);
+      mapa.addSource("limite", { type: "geojson", data: LIMITE_BUIN });
+      mapa.addLayer({ id: "limite", type: "line", source: "limite", paint: { "line-color": "#0A1222", "line-width": 2.2 } });
+
+      // Unidades vecinales
+      mapa.addSource("uv-sel", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      mapa.addLayer({ id: "uv-sel-fill", type: "fill", source: "uv-sel", paint: { "fill-color": "#1D4ED8", "fill-opacity": 0.12 } });
+      mapa.addLayer({ id: "uv-sel-line", type: "line", source: "uv-sel", paint: { "line-color": "#1D4ED8", "line-width": 2.5 } });
+      UNIDADES_VECINALES.forEach(uv => {
+        mapa.addSource(`uv-${uv.id}`, { type: "geojson", data: uv.data });
+        mapa.addLayer({ id: `uv-${uv.id}`, type: "line", source: `uv-${uv.id}`, layout: { visibility: "none" }, paint: { "line-color": "#0A1222", "line-width": 1, "line-dasharray": [3, 3], "line-opacity": 0.6 } });
+      });
+
+      // Mapa de calor de reportes
+      mapa.addSource("calor", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      mapa.addLayer({
+        id: "calor", type: "heatmap", source: "calor", layout: { visibility: "none" },
+        paint: {
+          "heatmap-weight": ["get", "peso"],
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 10, 0.8, 16, 2.2],
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 10, 16, 16, 40],
+          "heatmap-opacity": 0.75,
+          "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(29,78,216,0)", 0.25, "#4C7DFF", 0.5, "#F59F00", 0.8, "#E8590C", 1, "#C92A2A"],
         },
-        labelLayerId
-      );
+      }, capaEtiquetas);
 
-      const mundoBoundsLngLat = [ [-180, -90], [180, -90], [180, 90], [-180, 90], [-180, -90] ];
-      const buinRingLngLat = (buinBoundary.geometry.coordinates[0] as [number, number][]);
-      
-      map.addSource('mascara-invertida-src', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [mundoBoundsLngLat, buinRingLngLat] } }] }
-      });
+      // Línea de despacho (funcionario -> reporte)
+      mapa.addSource("despacho", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      mapa.addLayer({ id: "despacho-base", type: "line", source: "despacho", paint: { "line-color": "#0A1222", "line-width": 5, "line-opacity": 0.15 } });
+      mapa.addLayer({ id: "despacho", type: "line", source: "despacho", paint: { "line-color": "#1D4ED8", "line-width": 2.5, "line-dasharray": [0, 4, 3] } });
 
-      map.addLayer({ id: 'mascara-invertida-fill', type: 'fill', source: 'mascara-invertida-src', paint: { 'fill-color': '#0f172a', 'fill-opacity': 0.2 } }, labelLayerId);
-
-      map.addSource('buin-boundary-src', { type: 'geojson', data: buinBoundary as any });
-      map.addLayer({ id: 'buin-boundary-line', type: 'line', source: 'buin-boundary-src', paint: { 'line-color': '#000000', 'line-width': 2 } });
-
-      map.addSource('uv-seleccionada-src', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-      map.addLayer({ id: 'uv-seleccionada-fill', type: 'fill', source: 'uv-seleccionada-src', paint: { 'fill-color': '#38bdf8', 'fill-opacity': 0.25 } });
-      map.addLayer({ id: 'uv-seleccionada-line', type: 'line', source: 'uv-seleccionada-src', paint: { 'line-color': '#0284c7', 'line-width': 2 } });
-
-      UNIDADES_VECINALES.forEach((uv) => {
-        if (uv.id !== 'TODAS' && uv.data) {
-          map.addSource(`uv-borde-${uv.id}-src`, { type: 'geojson', data: uv.data as any });
-          map.addLayer({
-            id: `uv-borde-${uv.id}-line`,
-            type: 'line',
-            source: `uv-borde-${uv.id}-src`,
-            layout: { visibility: 'none' },
-            paint: { 'line-color': '#000000', 'line-width': 1, 'line-dasharray': [4, 4] },
-          });
-        }
-      });
+      setListo(true);
     });
 
-    return () => map.remove();
+    // Línea de despacho animada
+    const pasos = [[0, 4, 3], [0.5, 4, 2.5], [1, 4, 2], [1.5, 4, 1.5], [2, 4, 1], [2.5, 4, 0.5], [3, 4, 0], [0, 0.5, 3, 3.5], [0, 1, 3, 3], [0, 1.5, 3, 2.5], [0, 2, 3, 2], [0, 2.5, 3, 1.5], [0, 3, 3, 1], [0, 3.5, 3, 0.5]];
+    let paso = 0;
+    const animacion = setInterval(() => {
+      if (!mapa.getLayer("despacho")) return;
+      paso = (paso + 1) % pasos.length;
+      mapa.setPaintProperty("despacho", "line-dasharray", pasos[paso]);
+    }, 70);
+
+    const actuales = marcadores.current;
+    return () => {
+      clearInterval(animacion);
+      actuales.forEach(m => m.marker.remove());
+      actuales.clear();
+      mapa.remove();
+      mapaRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Efecto para centrar el mapa SOLO cuando cambia la coordenada real, no en cada refresco
+  // --------------------------------------------------------------------------
+  // MARCADORES DE REPORTES (se actualizan por diferencia: sin parpadeos)
+  // --------------------------------------------------------------------------
   useEffect(() => {
-    if (mapRef.current && coordenadaSeleccionada && coordenadaSeleccionada[0] && coordenadaSeleccionada[1]) {
-      mapRef.current.flyTo({
-        center: [coordenadaSeleccionada[1], coordenadaSeleccionada[0]], // Mapbox usa [longitud, latitud]
-        zoom: 16,
-        essential: true,
-        duration: 1500
+    const mapa = mapaRef.current;
+    if (!mapa) return;
+    const ahora = Date.now();
+    const vigentes = new Set<string>();
+    let indiceNuevo = 0;
+
+    tickets.forEach(t => {
+      if (t.latitud == null || t.longitud == null) return;
+      vigentes.add(t.id);
+      const cat = categoriaInfo(t.categoria?.nombre);
+      const activo = ESTADOS_ACTIVOS.includes(t.estado);
+      const prio = prioridadDe(t);
+      const urgente = activo && (prio === "CRITICA" || slaDe(t, ahora).vencido);
+      const firma = [t.estado, cat.nombre, prio, urgente, t.latitud, t.longitud].join("|");
+      const existente = marcadores.current.get(t.id);
+
+      if (existente && existente.firma === firma) return;
+      if (existente) { existente.marker.remove(); marcadores.current.delete(t.id); }
+
+      const el = document.createElement("div");
+      el.className = `marcador${urgente ? " urgente" : ""}${activo ? "" : " apagado"}${primeraCarga.current || existente ? "" : " nuevo"}`;
+      if (primeraCarga.current) { el.classList.add("nuevo"); el.style.setProperty("--i", String(Math.min(indiceNuevo++, 30))); }
+      el.style.setProperty("--color-marcador", cat.color);
+      el.style.setProperty("--color-urgente", prio === "CRITICA" ? "#C92A2A" : "#E8590C");
+      el.innerHTML = `<div class="marcador-cuerpo">${svgIcono(cat.icono)}</div>`;
+      el.setAttribute("role", "button");
+      el.setAttribute("aria-label", `${t.codigoTicket} ${cat.nombre}`);
+
+      const popup = document.createElement("div");
+      popup.style.minWidth = "210px";
+      popup.innerHTML = `
+        <div style="height:4px;background:${cat.color}"></div>
+        <div style="padding:10px 12px">
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline">
+            <span style="font-family:var(--mono);font-weight:600;font-size:13px">${escapar(t.codigoTicket)}</span>
+            <span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${ESTADOS[t.estado]?.color}">${ESTADOS[t.estado]?.etiqueta || t.estado}</span>
+          </div>
+          <div style="font-size:12px;font-weight:600;margin-top:4px">${escapar(cat.nombre)}</div>
+          <div style="font-size:11px;color:var(--texto-3);margin-top:2px">${tiempoRelativo(t.createdAt)} | Prioridad ${prio.toLowerCase()}</div>
+          ${onSeleccionarRef.current ? `<button data-abrir style="margin-top:10px;width:100%;height:30px;border:0;background:#0A1222;color:#fff;font-weight:600;font-size:11px;letter-spacing:.04em">ABRIR EXPEDIENTE</button>` : ""}
+        </div>`;
+      popup.querySelector("[data-abrir]")?.addEventListener("click", () => onSeleccionarRef.current?.(t.id));
+
+      const marker = new mapboxgl.Marker({ element: el, anchor: "bottom", offset: [0, -7] })
+        .setLngLat([t.longitud, t.latitud])
+        .setPopup(new mapboxgl.Popup({ offset: 30, closeButton: true, maxWidth: "260px" }).setDOMContent(popup))
+        .addTo(mapa);
+
+      el.addEventListener("click", ev => {
+        ev.stopPropagation();
+        onSeleccionarRef.current?.(t.id);
       });
+      el.addEventListener("mouseenter", () => { if (!marker.getPopup()?.isOpen()) marker.togglePopup(); });
+      el.addEventListener("mouseleave", () => { if (marker.getPopup()?.isOpen()) marker.togglePopup(); });
+
+      marcadores.current.set(t.id, { marker, el, firma });
+    });
+
+    marcadores.current.forEach((m, id) => {
+      if (!vigentes.has(id)) { m.marker.remove(); marcadores.current.delete(id); }
+    });
+    if (tickets.length) primeraCarga.current = false;
+
+    // Datos del mapa de calor (los activos pesan más)
+    const fuente = listo ? (mapa.getSource("calor") as mapboxgl.GeoJSONSource | undefined) : undefined;
+    fuente?.setData({
+      type: "FeatureCollection",
+      features: tickets.filter(t => t.latitud != null && t.longitud != null).map(t => ({
+        type: "Feature", properties: { peso: ESTADOS_ACTIVOS.includes(t.estado) ? 1 : 0.4 },
+        geometry: { type: "Point", coordinates: [t.longitud!, t.latitud!] },
+      })),
+    } as any);
+  }, [tickets, listo, onSeleccionarRef]);
+
+  // Resalta el seleccionado
+  useEffect(() => {
+    marcadores.current.forEach((m, id) => m.el.classList.toggle("activo", id === seleccionadoId));
+  }, [seleccionadoId, tickets]);
+
+  // --------------------------------------------------------------------------
+  // REPORTES CERCANOS (posibles duplicados)
+  // --------------------------------------------------------------------------
+  useEffect(() => {
+    const mapa = mapaRef.current;
+    if (!mapa || !cercanos.length) return;
+    const lista = cercanos.filter(c => c.latitud != null && !marcadores.current.has(c.id)).map(c => {
+      const el = document.createElement("div");
+      // Sin clases de animación en el elemento raíz: Mapbox controla su transform
+      el.className = "marcador-cercano";
+      el.title = `${c.codigoTicket} a ${c.distancia} m`;
+      el.addEventListener("click", () => onSeleccionarRef.current?.(c.id));
+      return new mapboxgl.Marker({ element: el }).setLngLat([c.longitud!, c.latitud!]).addTo(mapa);
+    });
+    return () => lista.forEach(m => m.remove());
+  }, [cercanos, onSeleccionarRef]);
+
+  // --------------------------------------------------------------------------
+  // FUNCIONARIOS EN TERRENO
+  // --------------------------------------------------------------------------
+  useEffect(() => {
+    const mapa = mapaRef.current;
+    if (!mapa) return;
+    const lista = funcionarios.filter(f => f.latitud != null && f.longitud != null).map(f => {
+      const enLinea = f.gpsActivo;
+      const iniciales = f.nombre.split(/\s+/).map(p => p[0]).join("").slice(0, 2).toUpperCase();
+      const el = document.createElement("div");
+      el.className = `marcador-funcionario${enLinea ? " en-linea" : ""}`;
+      el.innerHTML = `${svgIcono("funcionario", 2.4)}<span>${escapar(iniciales)}</span>`;
+      const ultima = f.ultimaUbicacion ? `${tiempoRelativo(f.ultimaUbicacion)}` : "sin registro";
+      const popup = new mapboxgl.Popup({ offset: 18, maxWidth: "240px" }).setHTML(`
+        <div style="padding:10px 12px;min-width:180px">
+          <div style="font-weight:600;font-size:12.5px">${escapar(f.nombre)}</div>
+          <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-top:4px;color:${enLinea ? "#2B8A3E" : "#7C889B"}">${enLinea ? "GPS activo" : "GPS apagado"}</div>
+          <div style="font-size:11px;color:#7C889B;margin-top:2px">Última posición ${ultima}</div>
+          <div style="font-size:11px;color:#46536A;margin-top:2px">${f._count?.ticketsAsignados ?? 0} tarea(s) activa(s)</div>
+        </div>`);
+      return new mapboxgl.Marker({ element: el }).setLngLat([f.longitud!, f.latitud!]).setPopup(popup).addTo(mapa);
+    });
+    return () => lista.forEach(m => m.remove());
+  }, [funcionarios]);
+
+  // --------------------------------------------------------------------------
+  // LÍNEA DE DESPACHO
+  // --------------------------------------------------------------------------
+  useEffect(() => {
+    const mapa = mapaRef.current;
+    if (!mapa || !listo) return;
+    const fuente = mapa.getSource("despacho") as mapboxgl.GeoJSONSource | undefined;
+    fuente?.setData(lineaDespacho ? {
+      type: "Feature", properties: {},
+      geometry: { type: "LineString", coordinates: [[lineaDespacho.desde[1], lineaDespacho.desde[0]], [lineaDespacho.hasta[1], lineaDespacho.hasta[0]]] },
+    } as any : { type: "FeatureCollection", features: [] });
+    if (lineaDespacho) {
+      const b = new mapboxgl.LngLatBounds();
+      b.extend([lineaDespacho.desde[1], lineaDespacho.desde[0]]);
+      b.extend([lineaDespacho.hasta[1], lineaDespacho.hasta[0]]);
+      mapa.fitBounds(b, { padding: 120, maxZoom: 16, duration: 900 });
     }
-  }, [coordenadaSeleccionada?.[0], coordenadaSeleccionada?.[1]]);
+  }, [lineaDespacho, listo]);
 
-  // Efectos de UVs
+  // --------------------------------------------------------------------------
+  // ENFOQUE, CAPAS Y VISTA
+  // --------------------------------------------------------------------------
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
-    const source = map.getSource('uv-seleccionada-src') as mapboxgl.GeoJSONSource;
-    if (source) source.setData(uvActual && uvActual.data ? (uvActual.data as any) : { type: 'FeatureCollection', features: [] });
-  }, [uvSeleccionadaId, uvActual]);
+    const mapa = mapaRef.current;
+    if (!mapa || !enfoque || enfoque[0] == null || enfoque[1] == null) return;
+    mapa.flyTo({ center: [enfoque[1], enfoque[0]], zoom: zoomEnfoque, essential: true, duration: 1400, curve: 1.6 });
+  }, [enfoque?.[0], enfoque?.[1], zoomEnfoque]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
-    UNIDADES_VECINALES.forEach((uv) => {
-      if (uv.id !== 'TODAS' && uv.data) {
-        const layerId = `uv-borde-${uv.id}-line`;
-        if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', mostrarBordesUV ? 'visible' : 'none');
-      }
-    });
-  }, [mostrarBordesUV]);
-
-  // ==========================================
-  // RENDERIZAR TICKETS
-  // ==========================================
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const markers: mapboxgl.Marker[] = [];
-
-    tickets.forEach((t) => {
-      if (!t.latitud || !t.longitud) return;
-
-      const popupNode = document.createElement('div');
-      popupNode.style.fontFamily = 'sans-serif';
-      popupNode.style.minWidth = '140px';
-      popupNode.innerHTML = `
-        <span style="font-size: 10px; font-weight: 900; color: #0284c7;">${t.codigoTicket}</span>
-        <p style="font-size: 12px; font-weight: bold; margin: 4px 0;">${t.categoria?.nombre || 'Incidencia'}</p>
-        <button id="btn-ticket-${t.id}" style="width: 100%; background-color: #2563eb; color: white; border: none; padding: 6px; border-radius: 6px; font-weight: bold; font-size: 11px; cursor: pointer;">
-          Ver Expediente
-        </button>
-      `;
-      popupNode.querySelector(`#btn-ticket-${t.id}`)?.addEventListener('click', () => onTicketSelect(t.id));
-      const popup = new mapboxgl.Popup({ offset: 25 }).setDOMContent(popupNode);
-
-      let marker: mapboxgl.Marker;
-
-      if (usarIconos3D) {
-        // MODO C4: Iconos 3D y lectura inteligente de palabras clave
-        const catName = (t.categoria?.nombre || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        const desc = (t.descripcionUsuario || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        const textoClave = `${catName} ${desc}`;
-
-        // 1) La categoría manda: un ticket de "Animales" que menciona basura sigue siendo Animales.
-        const ICONO_POR_CATEGORIA: Record<string, string> = {
-          'bache / vialidad': 'bache',
-          'basura / microbasural': 'basura',
-          'alumbrado publico': 'alumbrado',
-          'vehiculo abandonado': 'auto-abandonado',
-          'ruidos molestos': 'ruidos',
-          'senaletica / transito': 'senaletica',
-          'areas verdes': 'plaza',
-          'animales': 'animales',
-        };
-
-        let claseMarcador = ICONO_POR_CATEGORIA[catName] || '';
-
-        // 2) Solo si la categoría no se reconoce (p. ej. "Otro"), se intenta por palabras clave.
-        if (!claseMarcador) {
-          if (textoClave.includes('vehiculo') || textoClave.includes('auto')) claseMarcador = 'auto-abandonado';
-          else if (textoClave.includes('basura') || textoClave.includes('escombro') || textoClave.includes('microbasural')) claseMarcador = 'basura';
-          else if (textoClave.includes('alumbrado') || textoClave.includes('luz') || textoClave.includes('poste')) claseMarcador = 'alumbrado';
-          else if (textoClave.includes('ruido') || textoClave.includes('fiesta') || textoClave.includes('musica')) claseMarcador = 'ruidos';
-          else if (textoClave.includes('bache') || textoClave.includes('hoyo') || textoClave.includes('vial')) claseMarcador = 'bache';
-          else if (textoClave.includes('animal') || textoClave.includes('perro') || textoClave.includes('vaca')) claseMarcador = 'animales';
-          else if (textoClave.includes('senal') || textoClave.includes('transito') || textoClave.includes('pare')) claseMarcador = 'senaletica';
-          else if (textoClave.includes('verde') || textoClave.includes('riego') || textoClave.includes('arbol') || textoClave.includes('plaza')) claseMarcador = 'plaza';
-        }
-
-        if (claseMarcador) {
-          const customMarkerContainer = document.createElement('div');
-          customMarkerContainer.className = 'marcador-container';
-          const customMarkerImg = document.createElement('div');
-          customMarkerImg.className = `marcador-img ${claseMarcador}`;
-          customMarkerContainer.appendChild(customMarkerImg);
-
-          marker = new mapboxgl.Marker({ element: customMarkerContainer, anchor: 'bottom' })
-            .setLngLat([t.longitud, t.latitud])
-            .setPopup(popup)
-            .addTo(map);
-
-          popup.on('open', () => customMarkerImg.classList.add('activo'));
-          popup.on('close', () => customMarkerImg.classList.remove('activo'));
-        } else {
-          // Fallback al pin si no pilla palabras clave
-          marker = new mapboxgl.Marker({ color: '#2563eb' }).setLngLat([t.longitud, t.latitud]).setPopup(popup).addTo(map);
-        }
-      } else {
-        // MODO TERRENO/DEPARTAMENTO: Solo el Pin normal
-        marker = new mapboxgl.Marker({ color: '#2563eb' }).setLngLat([t.longitud, t.latitud]).setPopup(popup).addTo(map);
-      }
-      
-      markers.push(marker);
-    });
-
-    return () => markers.forEach((m) => m.remove());
-  }, [tickets, onTicketSelect, usarIconos3D]);
-
-  // ==========================================
-  // RENDERIZAR FUNCIONARIOS (FANTASMAS)
-  // ==========================================
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const fantasmasMarkers: mapboxgl.Marker[] = [];
-
-    fantasmas.forEach((f) => {
-      if (!f.latitud || !f.longitud) return;
-
-      const isOnline = f.gpsActivo;
-      const el = document.createElement('div');
-      
-      el.style.backgroundColor = isOnline ? '#10b981' : '#94a3b8';
-      el.style.width = '30px';
-      el.style.height = '30px';
-      el.style.borderRadius = '50%';
-      el.style.border = '3px solid white';
-      el.style.boxShadow = isOnline ? '0 0 15px rgba(16, 185, 129, 0.6)' : '0 2px 4px rgba(0,0,0,0.3)';
-      el.style.display = 'flex';
-      el.style.alignItems = 'center';
-      el.style.justifyContent = 'center';
-      el.style.fontSize = '14px';
-      el.innerHTML = '🚐';
-      
-      if (isOnline) {
-        el.style.animation = 'pulse 2s infinite';
-      }
-
-      const fechaUltima = f.ultimaUbicacion ? new Date(f.ultimaUbicacion).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Desconocida';
-
-      const popup = new mapboxgl.Popup({ offset: 20 }).setHTML(`
-        <div style="font-family: sans-serif; text-align: center; min-width: 120px;">
-          <strong style="color: ${isOnline ? '#10b981' : '#64748b'}; font-size: 13px;">${f.nombre}</strong><br/>
-          <span style="font-size: 11px; font-weight: bold; color: ${isOnline ? '#059669' : '#94a3b8'};">
-            ${isOnline ? '🟢 GPS Activo en vivo' : '⚪ GPS Apagado'}
-          </span><br/>
-          ${!isOnline ? `<span style="font-size: 10px; color: #cbd5e1;">Última pos: ${fechaUltima}</span>` : ''}
-        </div>
-      `);
-
-      const marker = new mapboxgl.Marker({ element: el })
-        .setLngLat([f.longitud, f.latitud])
-        .setPopup(popup)
-        .addTo(map);
-
-      fantasmasMarkers.push(marker);
-    });
-
-    return () => fantasmasMarkers.forEach(m => m.remove());
-  }, [fantasmas]);
-
-  const alternarVista = () => {
-    const map = mapRef.current;
-    if (!map) return;
-    if (esModo3D) {
-      map.easeTo({ pitch: 0, bearing: 0, duration: 1000 });
-      setEsModo3D(false);
-    } else {
-      map.easeTo({ pitch: 60, bearing: -15, duration: 1000 });
-      setEsModo3D(true);
+    const mapa = mapaRef.current;
+    if (!mapa || !listo) return;
+    const uv = UNIDADES_VECINALES.find(u => u.id === uvId);
+    (mapa.getSource("uv-sel") as mapboxgl.GeoJSONSource)?.setData(uv ? uv.data : { type: "FeatureCollection", features: [] });
+    if (uv) {
+      const b = new mapboxgl.LngLatBounds();
+      const geom = uv.data.geometry || uv.data.features?.[0]?.geometry;
+      const anillos = geom?.type === "MultiPolygon" ? geom.coordinates.flat() : geom?.coordinates || [];
+      anillos.forEach((a: [number, number][]) => a.forEach(p => b.extend(p)));
+      if (!b.isEmpty()) mapa.fitBounds(b, { padding: 60, duration: 1000 });
     }
+  }, [uvId, listo]);
+
+  useEffect(() => {
+    const mapa = mapaRef.current;
+    if (!mapa || !listo) return;
+    UNIDADES_VECINALES.forEach(uv => mapa.getLayer(`uv-${uv.id}`) && mapa.setLayoutProperty(`uv-${uv.id}`, "visibility", bordesUV ? "visible" : "none"));
+  }, [bordesUV, listo]);
+
+  useEffect(() => {
+    const mapa = mapaRef.current;
+    if (!mapa || !listo) return;
+    mapa.setLayoutProperty("calor", "visibility", calor ? "visible" : "none");
+    marcadores.current.forEach(m => (m.el.style.visibility = calor ? "hidden" : "visible"));
+  }, [calor, listo, tickets]);
+
+  const alternar3D = () => {
+    const mapa = mapaRef.current;
+    if (!mapa) return;
+    mapa.easeTo({ pitch: modo3D ? 0 : 60, bearing: modo3D ? 0 : -18, duration: 1000 });
+    setModo3D(!modo3D);
   };
 
+  const recentrar = () => {
+    setUvId("TODAS");
+    mapaRef.current?.flyTo({ center: CENTRO_BUIN, zoom: 12.6, pitch: 0, bearing: 0, duration: 1200 });
+    setModo3D(false);
+  };
+
+  const conteo = useMemo(() => {
+    const c: Record<string, number> = {};
+    tickets.forEach(t => {
+      if (!ESTADOS_ACTIVOS.includes(t.estado)) return;
+      const n = categoriaInfo(t.categoria?.nombre).nombre;
+      c[n] = (c[n] || 0) + 1;
+    });
+    return c;
+  }, [tickets]);
+
+  const estiloFlotante: React.CSSProperties = { position: "absolute", zIndex: 5, background: "rgba(255,255,255,0.97)", border: "1px solid var(--borde)", boxShadow: "var(--sombra-2)" };
+
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ width: "100%", height: "100%", position: "relative" }}>
+      <div ref={contenedor} style={{ position: "absolute", inset: 0 }} />
 
-      <style>{`
-        /* TAMAÑO OPTIMIZADO: 45px para no invadir las calles */
-        .marcador-container { width: 45px; height: 45px; z-index: 1; }
-        
-        .marcador-img {
-          width: 100%; height: 100%; background-size: contain; background-repeat: no-repeat;
-          background-position: center bottom; transform-origin: bottom center; cursor: pointer;
-          transition: transform 0.2s ease, filter 0.2s ease; filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.3));
-        }
-        
-        /* HOVER: Crece solo un poquito y se eleva sutilmente */
-        .marcador-img:hover {
-          transform: translateY(-4px) scale(1.15);
-          filter: drop-shadow(0px 6px 4px rgba(0,0,0,0.4));
-        }
-        
-        /* ACTIVO (CLIC): Se mantiene en su tamaño base pero con brillo */
-        .marcador-img.activo {
-          transform: translateY(0px) scale(1.05);
-          filter: drop-shadow(0px 4px 4px rgba(0,0,0,0.3)) drop-shadow(0 0 10px rgba(56, 189, 248, 0.9));
-        }
+      {!MAPBOX_TOKEN && (
+        <div className="vacio" style={{ position: "absolute", inset: 0, zIndex: 6, background: "var(--superficie-2)" }}>
+          Falta NEXT_PUBLIC_MAPBOX_TOKEN: el mapa no puede cargarse.
+        </div>
+      )}
 
-        /* 1. AUTO ABANDONADO */
-        .marcador-img.auto-abandonado { background-image: url('/marcadores/auto-estatico.png'); }
-        .marcador-img.auto-abandonado:hover, .marcador-img.auto-abandonado.activo { background-image: url('/marcadores/auto.gif'); }
-        
-        /* 2. BASURA / ESCOMBROS */
-        .marcador-img.basura { background-image: url('/marcadores/basura-estatica.png'); }
-        .marcador-img.basura:hover, .marcador-img.basura.activo { background-image: url('/marcadores/basura.gif'); }
+      {!compacto && (
+        <>
+          {/* Controles superiores */}
+          <div className="anim-arriba" style={{ ...estiloFlotante, top: 12, left: 12, display: "flex", alignItems: "stretch" }}>
+            <select className="select" value={uvId} onChange={e => setUvId(e.target.value)} aria-label="Unidad vecinal"
+              style={{ border: 0, height: 34, minWidth: 190, fontWeight: 600, fontSize: 12 }}>
+              <option value="TODAS">Toda la comuna</option>
+              {UNIDADES_VECINALES.map(uv => <option key={uv.id} value={uv.id}>UV {uv.id} | {uv.nombre}</option>)}
+            </select>
+            <button className="btn-icono" style={{ border: 0, borderLeft: "1px solid var(--borde)", height: 34 }} onClick={recentrar} title="Volver a la comuna"><FiCrosshair size={15} /></button>
+          </div>
 
-        /* 3. ALUMBRADO */
-        .marcador-img.alumbrado { background-image: url('/marcadores/alumbrado-estatico.png'); }
-        .marcador-img.alumbrado:hover, .marcador-img.alumbrado.activo { background-image: url('/marcadores/alumbrado.gif'); }
+          <div className="anim-arriba" style={{ ...estiloFlotante, top: 12, right: 12, display: "flex", ["--i" as any]: 1 }}>
+            <span className="fila" style={{ padding: "0 10px", gap: 6, color: "var(--texto-3)", borderRight: "1px solid var(--borde)" }}><FiLayers size={13} /></span>
+            {[
+              { id: "uv", etiqueta: "Límites UV", activo: bordesUV, accion: () => setBordesUV(!bordesUV) },
+              { id: "calor", etiqueta: "Calor", activo: calor, accion: () => setCalor(!calor) },
+              { id: "3d", etiqueta: "3D", activo: modo3D, accion: alternar3D },
+            ].map(b => (
+              <button key={b.id} onClick={b.accion} className={`segmento${b.activo ? " activo" : ""}`} style={{ height: 34 }}>{b.etiqueta}</button>
+            ))}
+          </div>
 
-        /* 4. RUIDOS */
-        .marcador-img.ruidos { background-image: url('/marcadores/ruidos-estatico.png'); }
-        .marcador-img.ruidos:hover, .marcador-img.ruidos.activo { background-image: url('/marcadores/ruidos.gif'); }
-
-        /* 5. BACHE / DAÑO VIAL */
-        .marcador-img.bache { background-image: url('/marcadores/bache-estatico.png'); }
-        .marcador-img.bache:hover, .marcador-img.bache.activo { background-image: url('/marcadores/bache.gif'); }
-
-        /* 6. ANIMALES SUELTOS (Seguridad Pública) */
-        .marcador-img.animales { background-image: url('/marcadores/animal-estatico.png'); }
-        .marcador-img.animales:hover, .marcador-img.animales.activo { background-image: url('/marcadores/animal.gif'); }
-
-        /* 7. SEÑALÉTICA / TRÁNSITO (Tránsito) */
-        .marcador-img.senaletica { background-image: url('/marcadores/senalitica-estatico.png'); }
-        .marcador-img.senaletica:hover, .marcador-img.senaletica.activo { background-image: url('/marcadores/senalitica.gif'); }
-
-        /* 8. ÁREAS VERDES / PLAZAS (Aseo y Ornato) */
-        .marcador-img.plaza { background-image: url('/marcadores/plaza-estatico.png'); }
-        .marcador-img.plaza:hover, .marcador-img.plaza.activo { background-image: url('/marcadores/plaza.gif'); }
-
-        @keyframes pulse {
-          0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-          70% { box-shadow: 0 0 0 15px rgba(16, 185, 129, 0); }
-          100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
-        }
-      `}</style>
-
-      {/* MENÚ DESPLEGABLE SUPERIOR */}
-      <div style={{ position: 'absolute', top: '16px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '8px 12px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <label htmlFor="select-uv" style={{ fontSize: '12px', fontWeight: 800, color: '#1e293b' }}>Unidad Vecinal:</label>
-        <select id="select-uv" value={uvSeleccionadaId} onChange={(e) => setUvSeleccionadaId(e.target.value)} style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12px', fontWeight: 600, backgroundColor: '#ffffff', color: '#0f172a', cursor: 'pointer', outline: 'none' }}>
-          {UNIDADES_VECINALES.map((uv) => (
-            <option key={uv.id} value={uv.id}>{uv.nombre}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* PANEL FLOTANTE LATERAL */}
-      <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 10, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '12px 16px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        <span style={{ fontSize: '12px', fontWeight: 900, color: '#0f172a' }}>CAPAS DEL MAPA</span>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 600, color: '#334155', cursor: 'pointer' }}>
-          <input type="checkbox" checked={mostrarBordesUV} onChange={(e) => setMostrarBordesUV(e.target.checked)} style={{ cursor: 'pointer' }} />
-          Límites vecinales (Rayados)
-        </label>
-        <button onClick={alternarVista} style={{ width: '100%', backgroundColor: '#0f172a', color: '#ffffff', border: 'none', padding: '6px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', marginTop: '2px' }}>
-          {esModo3D ? 'Cambiar a Vista 2D' : 'Cambiar a Vista 3D'}
-        </button>
-      </div>
-
-      <div ref={mapContainerRef} style={{ flex: 1, width: '100%', height: '100%' }} />
-
-      {/* ETIQUETA INFERIOR */}
-      <div style={{ position: 'absolute', bottom: '16px', left: '16px', backgroundColor: 'rgba(15, 23, 42, 0.9)', color: 'white', padding: '8px 14px', borderRadius: '10px', zIndex: 10, backdropFilter: 'blur(4px)', boxShadow: '0 4px 6px rgba(0,0,0,0.2)' }}>
-        <span style={{ display: 'block', fontSize: '8px', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase' }}>Zona Operativa C4</span>
-        <span style={{ fontSize: '12px', fontWeight: 900, color: '#38bdf8' }}>{uvActual ? uvActual.nombre : 'Comuna de Buin'}</span>
-      </div>
+          {/* Leyenda */}
+          <div className="anim-arriba" style={{ ...estiloFlotante, left: 12, bottom: 12, width: 220, ["--i" as any]: 2 }}>
+            <button onClick={() => setLeyendaAbierta(!leyendaAbierta)} className="fila entre" style={{ width: "100%", padding: "8px 12px", background: "var(--marino)", color: "#fff", border: 0 }}>
+              <span className="rotulo" style={{ color: "#fff" }}>Activos por categoría</span>
+              {leyendaAbierta ? <FiChevronDown size={14} /> : <FiChevronUp size={14} />}
+            </button>
+            {leyendaAbierta && (
+              <div style={{ padding: "6px 0" }}>
+                {CATEGORIAS.map(c => (
+                  <div key={c.nombre} className="fila entre" style={{ padding: "3px 12px", fontSize: 11.5, opacity: conteo[c.nombre] ? 1 : 0.45 }}>
+                    <span className="fila" style={{ gap: 8 }}><span style={{ width: 10, height: 10, background: c.color }} />{c.nombre}</span>
+                    <span className="mono" style={{ fontWeight: 600 }}>{conteo[c.nombre] || 0}</span>
+                  </div>
+                ))}
+                <div className="fila" style={{ gap: 8, padding: "6px 12px 2px", borderTop: "1px solid var(--borde)", marginTop: 4, fontSize: 11, color: "var(--texto-3)" }}>
+                  <span style={{ width: 10, height: 10, border: "2px solid var(--peligro)" }} /> Crítico o fuera de plazo
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

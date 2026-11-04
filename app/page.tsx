@@ -1,674 +1,589 @@
 "use client";
 
-import dynamic from 'next/dynamic';
-import { useEffect, useState, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
-import { io } from 'socket.io-client';
-import { useSession, signOut } from 'next-auth/react';
-import { 
-  FiMap, FiGrid, FiActivity, FiSearch, FiShield, 
-  FiClock, FiPhone, FiAlertTriangle, FiArrowLeft, FiRadio, FiCpu,
-  FiSettings, FiLogOut, FiSend, FiMessageSquare, FiImage, FiCheckCircle
-} from 'react-icons/fi';
+import dynamic from "next/dynamic";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { signOut } from "next-auth/react";
+import {
+  FiMap, FiColumns, FiBarChart2, FiSettings, FiLogOut, FiSearch, FiVolume2, FiVolumeX, FiSend,
+  FiEdit3, FiSlash, FiRotateCcw, FiInbox, FiAlertTriangle, FiCpu,
+} from "react-icons/fi";
 
-import Kanban from '../components/Kanban';
-import Estadisticas from '../components/Estadisticas';
-import AdminPanel from '../components/AdminPanel';
+import Kanban from "../components/Kanban";
+import Estadisticas from "../components/Estadisticas";
+import AdminPanel from "../components/AdminPanel";
+import DetalleTicket from "../components/DetalleTicket";
+import { Logo, PantallaCarga, IndicadorConexion, InsigniaEstado, IndicadorSla, Esqueleto, Vacio, Modal, Kpi } from "../components/ui/Comunes";
+import { Icono } from "../components/ui/Iconos";
+import { useAvisos } from "../components/ui/Avisos";
 
-import { useApi } from '../lib/useApi';
+import { useApi, mensajeError } from "../lib/useApi";
+import { usePerfil } from "../lib/usePerfil";
+import { useTiempoReal, useRefresco, useAgrupado } from "../lib/useTiempoReal";
+import { useAhora, usePreferencia, sonarAlerta } from "../lib/hooks";
+import type { Ticket, Prioridad, Estado } from "../lib/tipos";
+import {
+  ESTADOS, PRIORIDADES, ORDEN_PRIORIDADES, DEPARTAMENTOS, CATEGORIAS, ESTADOS_ACTIVOS, ORDEN_ESTADOS,
+  categoriaInfo, departamentoInfo, prioridadDe, slaDe, tiempoRelativo, normalizar, resumenDescripcion, formatearTelefono,
+} from "../lib/constantes";
 
-const MapComponent = dynamic(() => import('../components/Map'), { 
+const Mapa = dynamic(() => import("../components/Map"), {
   ssr: false,
-  loading: () => (
-    <div style={{ display: 'flex', height: '100%', width: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc', color: '#0284c7', fontSize: '12px', fontWeight: 'bold' }}>
-      CARGANDO CARTOGRAFÍA...
-    </div>
-  )
+  loading: () => <div className="esqueleto" style={{ width: "100%", height: "100%" }} />,
 });
 
-interface Ticket {
-  id: string;
-  codigoTicket: string;
-  estado: string;
-  analisisIA: string;
-  prioridadIA: string;
-  latitud: number | null;
-  longitud: number | null;
-  descripcionUsuario: string;
-  createdAt: string;
-  ciudadano: { telefono: string };
-  categoria?: { nombre: string };
-  departamento?: { nombre: string };
-  evidencias?: any[];
-  historial?: any[];
-}
+type Vista = "OPERACIONES" | "KANBAN" | "ESTADISTICAS" | "ADMINISTRACION";
 
-// Traduce el nombre guardado en la BD al valor de las opciones del selector de derivación
-function valorSelectDesdeNombre(nombre?: string): string {
-  const n = (nombre || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-  if (n.includes('ASEO') || n.includes('DIMAO')) return 'ASEO Y ORNATO';
-  if (n.includes('TRANSITO')) return 'TRANSITO';
-  if (n.includes('SEGURIDAD')) return 'SEGURIDAD PÚBLICA';
-  if (n.includes('OBRAS')) return 'OBRAS MUNICIPALES';
-  return 'SIN ASIGNAR';
-}
+const MOTIVOS_DESCARTE = [
+  "Duplicado de otro reporte",
+  "Fuera de la comuna de Buin",
+  "No corresponde a la Municipalidad",
+  "Información insuficiente para atender",
+  "Reporte falso o de prueba",
+];
 
-export default function Dashboard() {
-  const { data: session, status } = useSession(); 
-  const router = useRouter();
+export default function CentralC4() {
+  const { perfil, error: errorPerfil } = usePerfil(["ADMINISTRADOR"]);
   const api = useApi();
-  
+  const avisar = useAvisos();
+  const ahora = useAhora(30000);
+
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [cargando, setCargando] = useState(true);
-  const [sincronizandoUsuario, setSincronizandoUsuario] = useState(true);
-  
-  type Vista = 'MAPA' | 'KANBAN' | 'ESTADISTICA' | 'ADMINISTRACION';
-  const [vistaActiva, setVistaActiva] = useState<Vista>('MAPA');
-  
-  const [filtroTexto, setFiltroTexto] = useState("");
-  const [filtroEstado, setFiltroEstado] = useState("TODOS");
-  const [filtroPrioridad, setFiltroPrioridad] = useState("TODAS");
+  const [vista, setVista] = useState<Vista>("OPERACIONES");
 
-  const [ticketSeleccionado, setTicketSeleccionado] = useState<Ticket | null>(null);
-  const [ticketsCercanos, setTicketsCercanos] = useState<any[]>([]);
-  const [coordenadaEnfoque, setCoordenadaEnfoque] = useState<[number, number] | null>(null);
+  const [texto, setTexto] = useState("");
+  const [filtroEstado, setFiltroEstado] = useState<"ACTIVOS" | "TODOS" | Estado>("ACTIVOS");
+  const [filtroPrioridad, setFiltroPrioridad] = useState<"TODAS" | Prioridad>("TODAS");
+  const [filtroCategoria, setFiltroCategoria] = useState("TODAS");
+  const [filtroDepto, setFiltroDepto] = useState<"TODOS" | "SIN" | number>("TODOS");
+  const [soloAtrasados, setSoloAtrasados] = useState(false);
+  const [orden, setOrden] = useState<"URGENCIA" | "RECIENTES" | "ANTIGUOS">("URGENCIA");
 
-  const [departamentoDerivacion, setDepartamentoDerivacion] = useState("SIN ASIGNAR");
+  const [seleccionadoId, setSeleccionadoId] = useState<string | null>(null);
+  const [detalle, setDetalle] = useState<Ticket | null>(null);
+  const [cargandoDetalle, setCargandoDetalle] = useState(false);
+  const [cercanos, setCercanos] = useState<Ticket[]>([]);
+  const [deptoDestino, setDeptoDestino] = useState<number | "">("");
+  const [procesando, setProcesando] = useState(false);
+  const [modal, setModal] = useState<null | "DESCARTAR" | "NOTA" | "REABRIR">(null);
+  const [textoModal, setTextoModal] = useState("");
 
-  const API_GATEWAY_URL = process.env.NEXT_PUBLIC_API_GATEWAY_URL || "https://nn4p1ybmu2.execute-api.us-east-2.amazonaws.com";
+  const [nuevos, setNuevos] = useState<Set<string>>(new Set());
+  const [sonido, setSonido] = usePreferencia("munivox_sonido", true);
+  const busquedaRef = useRef<HTMLInputElement>(null);
+  const seleccionRef = useRef<string | null>(null);
+
+  // --------------------------------------------------------------------------
+  // DATOS
+  // --------------------------------------------------------------------------
+  const cargarTickets = useCallback(async () => {
+    try {
+      const res = await api("/tickets");
+      if (res.ok) {
+        const data: Ticket[] = await res.json();
+        setTickets(prev => (JSON.stringify(prev) === JSON.stringify(data) ? prev : data));
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setCargando(false);
+    }
+  }, [api]);
+
+  const cargarDetalle = useCallback(async (id: string, conCercanos = false) => {
+    setCargandoDetalle(true);
+    try {
+      const res = await api(`/tickets/${id}`);
+      if (!res.ok) {
+        avisar({ titulo: "No se pudo abrir el expediente", mensaje: await mensajeError(res), tipo: "error" });
+        return;
+      }
+      const t: Ticket = await res.json();
+      if (seleccionRef.current !== id) return;
+      setDetalle(t);
+      if (conCercanos) {
+        setDeptoDestino(t.departamentoId ?? categoriaInfo(t.categoria?.nombre).departamentoId ?? "");
+        setCercanos([]);
+        if (t.latitud != null && t.longitud != null) {
+          const rc = await api(`/tickets/cercanos?lat=${t.latitud}&lng=${t.longitud}&excluir=${t.id}`);
+          if (rc.ok && seleccionRef.current === id) setCercanos(await rc.json());
+        }
+      }
+    } finally {
+      setCargandoDetalle(false);
+    }
+  }, [api, avisar]);
+
+  const recargar = useAgrupado(() => {
+    cargarTickets();
+    if (seleccionRef.current) cargarDetalle(seleccionRef.current);
+  }, 350);
+
+  useEffect(() => { if (perfil) cargarTickets(); }, [perfil, cargarTickets]);
+
+  const { conectado, avisarCambio } = useTiempoReal({
+    activo: !!perfil,
+    onTicketCambio: () => recargar(),
+    onNuevoTicket: (t: any) => {
+      recargar();
+      if (!t?.id) return;
+      setNuevos(s => new Set(s).add(t.id));
+      setTimeout(() => setNuevos(s => { const n = new Set(s); n.delete(t.id); return n; }), 60000);
+      if (sonido) sonarAlerta("nuevo");
+      avisar({
+        titulo: `Nuevo reporte ${t.codigoTicket || ""}`,
+        mensaje: `${t.categoria?.nombre || "Sin clasificar"} | Prioridad ${String(t.prioridadIA || "media").toLowerCase()}`,
+        tipo: "nuevo",
+        duracion: 9000,
+        accion: { etiqueta: "Abrir expediente", onClick: () => { setVista("OPERACIONES"); seleccionar(t.id); } },
+      });
+    },
+  });
+  useRefresco(cargarTickets, conectado, !!perfil);
+
+  // --------------------------------------------------------------------------
+  // SELECCIÓN
+  // --------------------------------------------------------------------------
+  const seleccionar = useCallback((id: string) => {
+    setSeleccionadoId(id);
+    seleccionRef.current = id;
+    setDetalle(prev => (prev?.id === id ? prev : (tickets.find(t => t.id === id) as Ticket) || null));
+    cargarDetalle(id, true);
+  }, [tickets, cargarDetalle]);
+
+  const cerrarDetalle = useCallback(() => {
+    seleccionRef.current = null;
+    setSeleccionadoId(null);
+    setDetalle(null);
+    setCercanos([]);
+  }, []);
 
   useEffect(() => {
-    if (status === 'unauthenticated') {
-      router.push('/login');
-      return;
-    }
+    const tecla = (e: KeyboardEvent) => {
+      const escribiendo = ["INPUT", "TEXTAREA", "SELECT"].includes((e.target as HTMLElement)?.tagName);
+      if (e.key === "Escape" && !modal) cerrarDetalle();
+      if (e.key === "/" && !escribiendo) { e.preventDefault(); setVista("OPERACIONES"); setTimeout(() => busquedaRef.current?.focus(), 50); }
+    };
+    window.addEventListener("keydown", tecla);
+    return () => window.removeEventListener("keydown", tecla);
+  }, [modal, cerrarDetalle]);
 
-    if (session?.user?.email) {
-      const email = session.user.email.toLowerCase();
-      const prefijo = email.split('@')[0]; // Extraemos antes de la arroba
-      
-      const inicializarSesion = async () => {
-        try {
-          await api(`${API_GATEWAY_URL}/operadores/sincronizar`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: session?.user?.email,
-              sub: (session?.user as any)?.sub || undefined,
-              nombre: session?.user?.name || undefined
-            })
-          });
-
-          // SI ES FUNCIONARIO DE TERRENO (ej: juan.aseo o terreno.aseo)
-          if (prefijo.includes('terreno') || prefijo.includes('.')) {
-            router.push('/terreno');
-            return;
-          }
-
-          // SI NO ES EL OPERADOR CENTRAL, ENVIARLO A DEPARTAMENTOS (ej: aseo)
-          if (!prefijo.startsWith('operador')) {
-            router.push('/departamentos');
-            return;
-          }
-          
-          setSincronizandoUsuario(false);
-        } catch (error) {
-          console.error("Error al sincronizar operador con la BD:", error);
-          setSincronizandoUsuario(false);
-        }
-      };
-
-      inicializarSesion();
-    }
-  }, [session, status, router]);
-
-  const fetchTickets = async () => {
+  // --------------------------------------------------------------------------
+  // ACCIONES
+  // --------------------------------------------------------------------------
+  const actualizar = async (cuerpo: Record<string, unknown>, exito: string) => {
+    if (!detalle) return false;
+    setProcesando(true);
     try {
-      const res = await api(`${API_GATEWAY_URL}/tickets`);
-      if (res.ok) {
-        const data = await res.json();
-        // Solo actualiza si hubo cambios: evita redibujar el mapa en cada ciclo de refresco
-        setTickets(prev => JSON.stringify(prev) === JSON.stringify(data) ? prev : data);
+      const res = await api(`/tickets/${detalle.id}`, { method: "PUT", body: JSON.stringify(cuerpo) });
+      if (!res.ok) {
+        avisar({ titulo: "No se pudo actualizar", mensaje: await mensajeError(res), tipo: "error" });
+        return false;
       }
-    } catch (error) { 
-      console.error(error); 
-    } finally { 
-      setCargando(false); 
+      const t: Ticket = await res.json();
+      setDetalle(prev => (prev ? { ...prev, ...t } : t));
+      avisar({ titulo: exito, mensaje: t.codigoTicket, tipo: "ok" });
+      avisarCambio({ id: t.id, tipo: "c4", departamentoId: t.departamentoId ?? undefined });
+      cargarTickets();
+      return true;
+    } catch {
+      avisar({ titulo: "Sin conexión con la API", tipo: "error" });
+      return false;
+    } finally {
+      setProcesando(false);
     }
   };
 
-  useEffect(() => {
-    if (!sincronizandoUsuario) {
-      fetchTickets();
-      // Respaldo: refresca cada 10 s por si el socket no entrega el evento (o el cambio lo hizo otro usuario)
-      const intervaloTickets = setInterval(fetchTickets, 10000);
-      
-      const socket = io("https://socket-service.politeplant-263a4d5b.eastus.azurecontainerapps.io", { 
-        transports: ['websocket', 'polling'],
-        auth: {
-          token: (session as any)?.idToken
-        }
-      });
+  const derivar = async () => {
+    if (!deptoDestino) return;
+    const d = departamentoInfo(Number(deptoDestino));
+    await actualizar({ departamentoId: Number(deptoDestino) }, `Derivado a ${d?.nombre}`);
+  };
 
-      // CORRECCIÓN AQUÍ: Escuchar exactamente el mismo evento que emite el servidor
-      socket.on('connect_error', (err) => console.error('Socket C4 no conectó:', err.message));
+  const confirmarModal = async () => {
+    const motivo = textoModal.trim();
+    let ok = false;
+    if (modal === "DESCARTAR") ok = await actualizar({ nuevoEstado: "DESCARTADO", comentario: motivo }, "Reporte descartado");
+    if (modal === "NOTA") ok = await actualizar({ notaInterna: true, comentario: motivo }, "Nota agregada");
+    if (modal === "REABRIR") ok = await actualizar({ nuevoEstado: "EN_REVISION", operadorAsignadoId: null, comentario: motivo || "Reabierto por la central C4" }, "Reporte reabierto");
+    if (ok) { setModal(null); setTextoModal(""); }
+  };
 
-      socket.on('ticket-actualizado', (nuevoTicket) => {
-        console.log("¡Actualización recibida en tiempo real!", nuevoTicket);
-        fetchTickets(); // Esto recargará los tickets sin presionar F5
-      });
-
-      return () => { clearInterval(intervaloTickets); socket.disconnect(); };
-    }
-  }, [sincronizandoUsuario, session]);
-
-  const ticketsFiltrados = useMemo(() => {
-    return tickets.filter(t => {
-      const matchTexto = t.codigoTicket.toLowerCase().includes(filtroTexto.toLowerCase()) || 
-                         (t.ciudadano?.telefono || '').includes(filtroTexto);
-      const matchEstado = filtroEstado === "TODOS" || t.estado === filtroEstado;
-      const matchPrioridad = filtroPrioridad === "TODAS" || t.prioridadIA === filtroPrioridad;
-      return matchTexto && matchEstado && matchPrioridad;
+  // --------------------------------------------------------------------------
+  // FILTROS Y MÉTRICAS
+  // --------------------------------------------------------------------------
+  const filtrados = useMemo(() => {
+    const q = normalizar(texto);
+    const qTel = texto.replace(/\D/g, "");
+    const lista = tickets.filter(t => {
+      if (filtroEstado === "ACTIVOS" && !ESTADOS_ACTIVOS.includes(t.estado)) return false;
+      if (filtroEstado !== "ACTIVOS" && filtroEstado !== "TODOS" && t.estado !== filtroEstado) return false;
+      if (filtroPrioridad !== "TODAS" && prioridadDe(t) !== filtroPrioridad) return false;
+      if (filtroCategoria !== "TODAS" && categoriaInfo(t.categoria?.nombre).nombre !== filtroCategoria) return false;
+      if (filtroDepto === "SIN" && t.departamentoId) return false;
+      if (typeof filtroDepto === "number" && t.departamentoId !== filtroDepto) return false;
+      if (soloAtrasados && (!ESTADOS_ACTIVOS.includes(t.estado) || !slaDe(t, ahora).vencido)) return false;
+      if (!q) return true;
+      return normalizar(`${t.codigoTicket} ${t.categoria?.nombre} ${t.analisisIA} ${t.descripcionUsuario}`).includes(q) || (qTel.length >= 4 && (t.ciudadano?.telefono || "").includes(qTel));
     });
-  }, [tickets, filtroTexto, filtroEstado, filtroPrioridad]);
+    return lista.sort((a, b) => {
+      if (orden === "RECIENTES") return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      if (orden === "ANTIGUOS") return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      const pa = ESTADOS_ACTIVOS.includes(a.estado) ? 1 : 0, pb = ESTADOS_ACTIVOS.includes(b.estado) ? 1 : 0;
+      return pb - pa || PRIORIDADES[prioridadDe(b)].peso - PRIORIDADES[prioridadDe(a)].peso || slaDe(a, ahora).restanteMs - slaDe(b, ahora).restanteMs;
+    });
+  }, [tickets, texto, filtroEstado, filtroPrioridad, filtroCategoria, filtroDepto, soloAtrasados, orden, ahora]);
 
-  const abrirDetalle = async (id: string, lat: number | null, lng: number | null) => {
-    try {
-      const res = await api(`${API_GATEWAY_URL}/tickets/${id}`);
-      if (res.ok) {
-        const detalle: Ticket = await res.json();
-        
-        if (detalle.estado === 'PENDIENTE') {
-          await cambiarEstado(detalle.id, 'EN_REVISION');
-          detalle.estado = 'EN_REVISION';
-        }
+  const metricas = useMemo(() => {
+    const activos = tickets.filter(t => ESTADOS_ACTIVOS.includes(t.estado));
+    const inicioDia = new Date(ahora); inicioDia.setHours(0, 0, 0, 0);
+    return {
+      pendientes: tickets.filter(t => t.estado === "PENDIENTE").length,
+      revision: tickets.filter(t => t.estado === "EN_REVISION").length,
+      terreno: tickets.filter(t => t.estado === "DESPACHADO").length,
+      atrasados: activos.filter(t => slaDe(t, ahora).vencido).length,
+      criticos: activos.filter(t => prioridadDe(t) === "CRITICA").length,
+      hoy: tickets.filter(t => new Date(t.createdAt).getTime() >= inicioDia.getTime()).length,
+      resueltosHoy: tickets.filter(t => t.estado === "RESUELTO" && new Date(t.updatedAt || 0).getTime() >= inicioDia.getTime()).length,
+    };
+  }, [tickets, ahora]);
 
-        setTicketSeleccionado(detalle);
-        setDepartamentoDerivacion(valorSelectDesdeNombre(detalle.departamento?.nombre));
-        
-        if (lat && lng) {
-          setCoordenadaEnfoque([lat, lng]);
-          try {
-            const resCercanos = await api(`${API_GATEWAY_URL}/tickets/cercanos?lat=${lat}&lng=${lng}`);
-            if (resCercanos.ok) setTicketsCercanos(await resCercanos.json());
-          } catch (e) {
-            console.warn("Ruta de tickets cercanos no disponible", e);
-          }
-        } else {
-          setCoordenadaEnfoque(null);
-          setTicketsCercanos([]);
-        }
-      }
-    } catch (error) { console.error(error); }
-  };
+  const hayFiltros = texto || filtroEstado !== "ACTIVOS" || filtroPrioridad !== "TODAS" || filtroCategoria !== "TODAS" || filtroDepto !== "TODOS" || soloAtrasados;
+  const limpiarFiltros = () => { setTexto(""); setFiltroEstado("ACTIVOS"); setFiltroPrioridad("TODAS"); setFiltroCategoria("TODAS"); setFiltroDepto("TODOS"); setSoloAtrasados(false); };
 
-  const cerrarDetalle = () => {
-    setTicketSeleccionado(null);
-    setTicketsCercanos([]);
-    setCoordenadaEnfoque(null);
-  };
-
-  const cambiarEstado = async (ticketId: string, nuevoEstado: string) => {
-    try {
-      const res = await api(`${API_GATEWAY_URL}/tickets/${ticketId}`, {
-        method: 'PUT', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ nuevoEstado })
-      });
-      if (res.ok) {
-        if (ticketSeleccionado && ticketSeleccionado.id === ticketId) {
-          setTicketSeleccionado(prev => prev ? { ...prev, estado: nuevoEstado } : null);
-        }
-        fetchTickets(); 
-      }
-    } catch (error) { console.error(error); }
-  };
-
-  const derivarTicket = async (ticketId: string) => {
-    if (departamentoDerivacion === "SIN ASIGNAR") {
-      alert("⚠️ Debe seleccionar un departamento municipal válido antes de enviar a despacho.");
-      return;
-    }
-
-    try {
-      const res = await api(`${API_GATEWAY_URL}/tickets/${ticketId}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ nuevoEstado: 'DESPACHADO', departamentoAsignado: departamentoDerivacion })
-      });
-      if (res.ok) {
-        fetchTickets();
-        if (ticketSeleccionado && ticketSeleccionado.id === ticketId) cerrarDetalle();
-      }
-    } catch (error) { console.error(error); }
-  };
-
-  const obtenerEstiloPrioridad = (prioridad: string) => {
-    if (prioridad === 'ALTA' || prioridad === 'CRITICA') return { backgroundColor: '#fff1f2', color: '#e11d48', borderColor: '#fecdd3' };
-    if (prioridad === 'MEDIA') return { backgroundColor: '#fffbeb', color: '#d97706', borderColor: '#fde68a' };
-    return { backgroundColor: '#f1f5f9', color: '#475569', borderColor: '#e2e8f0' };
-  };
-
-  const obtenerEstadoVisual = (t: Ticket) => {
-    if (t.estado === 'PENDIENTE') {
-       const tieneGPS = t.latitud !== null;
-       const tieneFoto = t.evidencias && t.evidencias.length > 0;
-       if (!tieneGPS || !tieneFoto) return { label: 'INCOMPLETO (GPS/FOTO)', bg: '#fef3c7', text: '#d97706', border: '#fde68a' }; 
-       return { label: 'NUEVO • PENDIENTE EVALUACIÓN', bg: '#fee2e2', text: '#dc2626', border: '#fecaca' }; 
-    }
-    if (t.estado === 'EN_REVISION') {
-       if (!t.departamento || t.departamento.nombre === 'SIN ASIGNAR') return { label: 'EN EVALUACIÓN (SIN ASIGNAR)', bg: '#e0f2fe', text: '#0369a1', border: '#bae6fd' };
-       return { label: `EVALUADO • ${t.departamento.nombre}`, bg: '#f0f9ff', text: '#0284c7', border: '#bae6fd' };
-    }
-    if (t.estado === 'DERIVADO' || t.estado === 'DESPACHADO') return { label: 'EN TERRENO (DESPACHADO)', bg: '#eff6ff', text: '#2563eb', border: '#bfdbfe' }; 
-    if (t.estado === 'RESUELTO') return { label: 'RESUELTO', bg: '#ecfdf5', text: '#059669', border: '#a7f3d0' }; 
-    return { label: t.estado, bg: '#f1f5f9', text: '#475569', border: '#e2e8f0' };
-  };
-
-  const renderizarChat = (texto: string) => {
-    const partes = texto.split(/(\[Usuario\]:|\[Sistema\]:)/g).filter(Boolean);
-    let mensajes = [];
-    let autorActual = 'Ciudadano';
-
-    for (let i = 0; i < partes.length; i++) {
-      const parte = partes[i].trim();
-      if (!parte) continue;
-      if (parte === '[Usuario]:') autorActual = 'Ciudadano';
-      else if (parte === '[Sistema]:') autorActual = 'MuniVox';
-      else mensajes.push({ autor: autorActual, texto: parte });
-    }
-
-    return mensajes.map((m, idx) => (
-      <div key={idx} style={{ 
-        alignSelf: m.autor === 'Ciudadano' ? 'flex-end' : 'flex-start',
-        backgroundColor: m.autor === 'Ciudadano' ? '#dcf8c6' : '#ffffff',
-        border: '1px solid #e2e8f0',
-        padding: '8px 12px',
-        borderRadius: m.autor === 'Ciudadano' ? '12px 0px 12px 12px' : '0px 12px 12px 12px',
-        maxWidth: '85%',
-        fontSize: '11px',
-        color: '#1e293b',
-        marginBottom: '6px',
-        boxShadow: '0 1px 1px rgba(0,0,0,0.05)'
-      }}>
-        <strong style={{ display: 'block', fontSize: '9px', color: '#64748b', marginBottom: '2px' }}>{m.autor}</strong>
-        {m.texto}
-      </div>
-    ));
-  };
-
-  if (status === 'loading' || sincronizandoUsuario) {
+  // --------------------------------------------------------------------------
+  // RENDER
+  // --------------------------------------------------------------------------
+  if (errorPerfil) {
     return (
-      <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', backgroundColor: '#F4F7FE', flexDirection: 'column', gap: '16px' }}>
-        <div style={{ width: '40px', height: '40px', border: '4px solid #2563EB', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-        <p style={{ fontWeight: 'bold', color: '#1e293b', fontSize: '14px', letterSpacing: '1px' }}>VERIFICANDO ACCESOS...</p>
+      <div className="fondo-rejilla" style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+        <div className="modal marco" style={{ maxWidth: 420 }}>
+          <div className="modal-cabecera"><h3 className="titulo-2">No se pudo validar tu acceso</h3></div>
+          <div className="modal-cuerpo"><p style={{ margin: 0 }}>{errorPerfil}</p></div>
+          <div className="modal-pie">
+            <button className="btn btn-fantasma" onClick={() => signOut({ callbackUrl: "/login" })}>Cerrar sesión</button>
+            <button className="btn btn-primario" onClick={() => location.reload()}>Reintentar</button>
+          </div>
+        </div>
       </div>
     );
   }
+  if (!perfil) return <PantallaCarga />;
+
+  const navegacion: { id: Vista; etiqueta: string; icono: React.ReactNode; contador?: number }[] = [
+    { id: "OPERACIONES", etiqueta: "Operaciones", icono: <FiMap size={16} />, contador: metricas.pendientes },
+    { id: "KANBAN", etiqueta: "Flujo de casos", icono: <FiColumns size={16} /> },
+    { id: "ESTADISTICAS", etiqueta: "Estadísticas", icono: <FiBarChart2 size={16} /> },
+    { id: "ADMINISTRACION", etiqueta: "Administración", icono: <FiSettings size={16} /> },
+  ];
+  const titulos: Record<Vista, [string, string]> = {
+    OPERACIONES: ["Operaciones en tiempo real", "Mapa y bandeja de reportes de la comuna"],
+    KANBAN: ["Flujo de casos", "Estado de todos los reportes, del ingreso al cierre"],
+    ESTADISTICAS: ["Estadísticas e informes", "Indicadores de gestión, plazos y satisfacción"],
+    ADMINISTRACION: ["Administración", "Personal, departamentos y vecinos"],
+  };
+
+  const recomendado = detalle ? categoriaInfo(detalle.categoria?.nombre).departamentoId : null;
+  const cerrado = detalle && ["RESUELTO", "DESCARTADO"].includes(detalle.estado);
 
   return (
-    <div style={{ display: 'flex', height: '100vh', backgroundColor: '#F4F7FE', fontFamily: 'system-ui, sans-serif', color: '#334155', overflow: 'hidden' }}>
-      
-      {/* BARRA LATERAL */}
-      <aside style={{ width: '260px', background: 'linear-gradient(to bottom, #2563EB, #1D4ED8)', color: 'white', display: 'flex', flexDirection: 'column', boxShadow: '4px 0 15px rgba(0,0,0,0.05)', zIndex: 20 }}>
-        <div style={{ padding: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{ padding: '10px', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: '12px', backdropFilter: 'blur(4px)' }}>
-            <FiShield size={22} color="white" />
-          </div>
-          <div>
-            <h1 style={{ fontSize: '18px', fontWeight: 900, letterSpacing: '1px', margin: 0 }}>MUNIVOX</h1>
-            <span style={{ fontSize: '9px', color: '#bae6fd', fontWeight: 600, letterSpacing: '1.5px', textTransform: 'uppercase' }}>C4 • MONITOREO</span>
-          </div>
+    <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
+      {/* =================== NAVEGACIÓN =================== */}
+      <aside style={{ width: 236, background: "var(--marino)", color: "#fff", display: "flex", flexDirection: "column", flexShrink: 0, borderRight: "1px solid var(--marino-borde)" }}>
+        <div style={{ padding: "18px 18px 16px", borderBottom: "1px solid var(--marino-borde)" }}>
+          <Logo subtitulo="Central C4 | Buin" />
         </div>
+        <nav style={{ padding: "12px 0", flex: 1 }}>
+          <div className="rotulo" style={{ padding: "6px 18px 8px", color: "#5D6F92" }}>Centro de mando</div>
+          {navegacion.map((n, i) => (
+            <button key={n.id} className={`nav-item anim-izquierda${vista === n.id ? " activo" : ""}`} style={{ animationDelay: `${i * 50}ms` }} onClick={() => setVista(n.id)}>
+              {n.icono}
+              <span className="crece">{n.etiqueta}</span>
+              {!!n.contador && <span className="mono" style={{ background: "var(--alerta)", color: "#fff", fontSize: 10.5, fontWeight: 600, padding: "1px 6px" }}>{n.contador}</span>}
+            </button>
+          ))}
 
-        <nav style={{ flex: 1, padding: '0 16px', display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' }}>
-          <div 
-            onClick={() => setVistaActiva('MAPA')}
-            style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', color: vistaActiva === 'MAPA' ? 'white' : '#e0f2fe', backgroundColor: vistaActiva === 'MAPA' ? 'rgba(255,255,255,0.2)' : 'transparent', fontSize: '12px', fontWeight: vistaActiva === 'MAPA' ? 'bold' : 500, borderRadius: '16px', backdropFilter: vistaActiva === 'MAPA' ? 'blur(4px)' : 'none', cursor: 'pointer' }}>
-            <FiMap size={16} /> Visor Territorial
+          <div className="rotulo" style={{ padding: "22px 18px 8px", color: "#5D6F92" }}>Estado de la comuna</div>
+          <div style={{ padding: "0 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {[
+              { e: "PENDIENTE" as Estado, n: metricas.pendientes },
+              { e: "EN_REVISION" as Estado, n: metricas.revision },
+              { e: "DESPACHADO" as Estado, n: metricas.terreno },
+            ].map(x => {
+              const max = Math.max(metricas.pendientes, metricas.revision, metricas.terreno, 1);
+              return (
+                <button key={x.e} onClick={() => { setVista("OPERACIONES"); setFiltroEstado(x.e); }} style={{ background: "none", border: 0, padding: 0, textAlign: "left", color: "inherit" }}>
+                  <div className="fila entre" style={{ fontSize: 11.5, color: "var(--marino-texto)" }}>
+                    <span>{ESTADOS[x.e].etiqueta}</span><span className="mono" style={{ color: "#fff", fontWeight: 600 }}>{x.n}</span>
+                  </div>
+                  <div style={{ height: 3, background: "var(--marino-3)", marginTop: 5 }}>
+                    <div style={{ height: "100%", width: `${(x.n / max) * 100}%`, background: ESTADOS[x.e].color, transition: "width 0.8s var(--curva)" }} />
+                  </div>
+                </button>
+              );
+            })}
           </div>
-          <div 
-            onClick={() => setVistaActiva('KANBAN')}
-            style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', color: vistaActiva === 'KANBAN' ? 'white' : '#e0f2fe', backgroundColor: vistaActiva === 'KANBAN' ? 'rgba(255,255,255,0.2)' : 'transparent', fontSize: '12px', fontWeight: vistaActiva === 'KANBAN' ? 'bold' : 500, borderRadius: '16px', backdropFilter: vistaActiva === 'KANBAN' ? 'blur(4px)' : 'none', cursor: 'pointer' }}>
-            <FiGrid size={16} /> Tablero Kanban
-          </div>
-          <div 
-            onClick={() => setVistaActiva('ESTADISTICA')}
-            style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', color: vistaActiva === 'ESTADISTICA' ? 'white' : '#e0f2fe', backgroundColor: vistaActiva === 'ESTADISTICA' ? 'rgba(255,255,255,0.2)' : 'transparent', fontSize: '12px', fontWeight: vistaActiva === 'ESTADISTICA' ? 'bold' : 500, borderRadius: '16px', backdropFilter: vistaActiva === 'ESTADISTICA' ? 'blur(4px)' : 'none', cursor: 'pointer' }}>
-            <FiActivity size={16} /> Estadística
-          </div>
-
-          {(session?.user as any)?.role === 'ADMINISTRADOR' && (
-            <div 
-              onClick={() => setVistaActiva('ADMINISTRACION')}
-              style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', marginTop: '16px', color: vistaActiva === 'ADMINISTRACION' ? 'white' : '#cbd5e1', backgroundColor: vistaActiva === 'ADMINISTRACION' ? 'rgba(255,255,255,0.2)' : 'transparent', fontSize: '12px', fontWeight: vistaActiva === 'ADMINISTRACION' ? 'bold' : 500, borderRadius: '16px', cursor: 'pointer', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-              <FiSettings size={16} /> Panel Administrativo
-            </div>
-          )}
         </nav>
-
-        <div style={{ margin: '16px', padding: '16px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '16px', backdropFilter: 'blur(4px)', border: '1px solid rgba(255,255,255,0.15)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <span style={{ display: 'block', fontSize: '9px', color: '#bae6fd', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '1px' }}>{(session?.user as any)?.role || 'Operador'} Activo</span>
-            <span style={{ display: 'block', fontSize: '12px', color: 'white', fontWeight: 'bold', marginTop: '4px' }}>{session?.user?.name || 'Usuario'}</span>
+        <div style={{ padding: 14, borderTop: "1px solid var(--marino-borde)", background: "var(--marino-2)" }}>
+          <div className="fila entre">
+            <div className="fila" style={{ gap: 10, minWidth: 0 }}>
+              <span className="mono" style={{ width: 32, height: 32, background: "#7048E8", display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 600, fontSize: 12, flexShrink: 0 }}>
+                {perfil.nombre.split(/\s+/).map(p => p[0]).join("").slice(0, 2).toUpperCase()}
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <div className="truncar" style={{ fontWeight: 600, fontSize: 12.5 }}>{perfil.nombre}</div>
+                <div className="rotulo" style={{ color: "var(--marino-texto)", fontSize: 9 }}>Operador C4</div>
+              </div>
+            </div>
+            <button onClick={() => signOut({ callbackUrl: "/login" })} title="Cerrar sesión" style={{ background: "transparent", border: "1px solid var(--marino-borde)", color: "var(--marino-texto)", width: 30, height: 30, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+              <FiLogOut size={14} />
+            </button>
           </div>
-          <button 
-            onClick={() => signOut({ callbackUrl: '/login' })} 
-            style={{ background: 'transparent', border: 'none', color: '#fca5a5', cursor: 'pointer', padding: '4px' }} 
-            title="Cerrar Sesión"
-          >
-            <FiLogOut size={18} />
-          </button>
         </div>
       </aside>
 
-      {/* CONTENIDO PRINCIPAL */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        
-        <header style={{ backgroundColor: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(8px)', borderBottom: '1px solid #e2e8f0', padding: '16px 28px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 10, height: '70px', boxSizing: 'border-box' }}>
-          <div>
-            <h2 style={{ fontSize: '12px', fontWeight: 900, color: '#1e293b', letterSpacing: '1px', textTransform: 'uppercase', margin: 0 }}>PANEL DE CONTROL GEOESPACIAL</h2>
-            <p style={{ fontSize: '11px', color: '#64748b', margin: '2px 0 0 0', fontWeight: 500 }}>Gestión integral de reportes ciudadanos</p>
+      {/* =================== CONTENIDO =================== */}
+      <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <header style={{ height: 60, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "0 20px", background: "var(--superficie)", borderBottom: "1px solid var(--borde)", position: "relative" }}>
+          <div key={vista} className="anim-arriba" style={{ minWidth: 0 }}>
+            <h1 className="titulo-2">{titulos[vista][0]}</h1>
+            <div className="texto-3" style={{ fontSize: 11.5 }}>{titulos[vista][1]}</div>
           </div>
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#ecfdf5', border: '1px solid #a7f3d0', padding: '6px 14px', borderRadius: '9999px' }}>
-              <span style={{ width: '8px', height: '8px', backgroundColor: '#10b981', borderRadius: '50%', display: 'inline-block' }}></span>
-              <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#059669', letterSpacing: '0.5px' }}>SISTEMA EN LÍNEA</span>
-            </div>
-            <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: '#e0f2fe', color: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '12px' }}>
-              {session?.user?.name ? session.user.name.charAt(0).toUpperCase() : 'OP'}
-            </div>
+          <div className="fila" style={{ gap: 16 }}>
+            <IndicadorConexion conectado={conectado} />
+            <span className="mono texto-2 oculto-movil" style={{ fontSize: 12 }}>{new Date(ahora).toLocaleDateString("es-CL", { weekday: "short", day: "2-digit", month: "short" })} {new Date(ahora).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}</span>
+            <button className="btn-icono" onClick={() => setSonido(!sonido)} title={sonido ? "Silenciar alertas" : "Activar sonido de alertas"}>
+              {sonido ? <FiVolume2 size={15} /> : <FiVolumeX size={15} />}
+            </button>
           </div>
         </header>
-        
-        <div style={{ flex: 1, display: 'flex', padding: '24px', gap: '24px', overflow: 'hidden', boxSizing: 'border-box' }}>
-          
-          {vistaActiva === 'MAPA' && (
+
+        <div style={{ flex: 1, minHeight: 0, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+          {vista === "OPERACIONES" && (
             <>
-              <div style={{ flex: 2, backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '24px', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)' }}>
-                <div style={{ backgroundColor: 'white', padding: '14px 20px', borderBottom: '1px solid #f1f5f9', fontSize: '11px', fontWeight: 'bold', color: '#64748b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><FiRadio color="#0ea5e9" /> CARTOGRAFÍA EN TIEMPO REAL</span>
-                  <span style={{ color: '#0284c7', fontFamily: 'monospace', fontSize: '10px', backgroundColor: '#f0f9ff', padding: '4px 10px', borderRadius: '8px', border: '1px solid #bae6fd' }}>WGS 84</span>
-                </div>
-                <div style={{ flex: 1, position: 'relative' }}>
-                  <MapComponent 
-                    tickets={ticketsFiltrados} 
-                    fantasmas={ticketsCercanos} 
-                    coordenadaSeleccionada={coordenadaEnfoque} 
-                    onTicketSelect={(id) => {
-                      const t = ticketsFiltrados.find(x => x.id === id);
-                      if(t) abrirDetalle(t.id, t.latitud, t.longitud);
-                    }} 
-                  />
-                </div>
+              {/* KPIs operativos */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 10 }}>
+                {[
+                  { t: "Nuevos sin derivar", v: metricas.pendientes, c: ESTADOS.PENDIENTE.color, f: () => setFiltroEstado("PENDIENTE") },
+                  { t: "En revisión", v: metricas.revision, c: ESTADOS.EN_REVISION.color, f: () => setFiltroEstado("EN_REVISION") },
+                  { t: "En terreno", v: metricas.terreno, c: ESTADOS.DESPACHADO.color, f: () => setFiltroEstado("DESPACHADO") },
+                  { t: "Fuera de plazo", v: metricas.atrasados, c: "var(--peligro)", f: () => { setFiltroEstado("ACTIVOS"); setSoloAtrasados(true); } },
+                  { t: "Críticos activos", v: metricas.criticos, c: PRIORIDADES.CRITICA.color, f: () => { setFiltroEstado("ACTIVOS"); setFiltroPrioridad("CRITICA"); } },
+                  { t: "Ingresados hoy", v: metricas.hoy, c: "var(--acento)", d: `${metricas.resueltosHoy} resueltos hoy`, f: () => { setFiltroEstado("TODOS"); setOrden("RECIENTES"); } },
+                ].map((k, i) => (
+                  <button key={k.t} onClick={k.f} style={{ padding: 0, border: 0, background: "none", textAlign: "left" }} title="Filtrar la bandeja">
+                    <Kpi i={i} titulo={k.t} valor={k.v} color={k.c} detalle={k.d} />
+                  </button>
+                ))}
               </div>
 
-              <div style={{ width: '440px', backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '24px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)' }}>
-                
-                {!ticketSeleccionado && (
-                  <>
-                    <div style={{ padding: '20px', borderBottom: '1px solid #f1f5f9', backgroundColor: 'white' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-                        <h3 style={{ fontSize: '12px', fontWeight: 900, color: '#1e293b', margin: 0, letterSpacing: '0.5px' }}>BANDEJA DE INCIDENTES</h3>
-                        <span style={{ fontSize: '10px', fontWeight: 'bold', backgroundColor: '#f0f9ff', color: '#0284c7', border: '1px solid #bae6fd', padding: '4px 10px', borderRadius: '12px' }}>
-                          {ticketsFiltrados.length} Registros
-                        </span>
-                      </div>
-                      
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                        <div style={{ position: 'relative' }}>
-                          <FiSearch style={{ position: 'absolute', left: '14px', top: '14px', color: '#94a3b8' }} size={16} />
-                          <input 
-                            type="text" 
-                            placeholder="Buscar ID o teléfono..." 
-                            value={filtroTexto}
-                            onChange={(e) => setFiltroTexto(e.target.value)}
-                            style={{ width: '100%', fontSize: '12px', fontWeight: 500, padding: '12px 14px 12px 40px', backgroundColor: '#F4F7FE', border: '1px solid transparent', borderRadius: '16px', outline: 'none', boxSizing: 'border-box' }} 
-                          />
-                        </div>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <select 
-                            value={filtroEstado}
-                            onChange={(e) => setFiltroEstado(e.target.value)}
-                            style={{ flex: 1, fontSize: '11px', fontWeight: 600, padding: '10px', backgroundColor: '#F4F7FE', border: '1px solid transparent', borderRadius: '14px', outline: 'none', color: '#475569', cursor: 'pointer' }}
-                          >
-                            <option value="TODOS">Estado: Todos</option>
-                            <option value="PENDIENTE">Pendientes</option>
-                            <option value="EN_REVISION">En Evaluación</option>
-                            <option value="DESPACHADO">En Terreno / Despachados</option>
-                            <option value="RESUELTO">Resueltos</option>
-                          </select>
-                          <select 
-                            value={filtroPrioridad}
-                            onChange={(e) => setFiltroPrioridad(e.target.value)}
-                            style={{ flex: 1, fontSize: '11px', fontWeight: 600, padding: '10px', backgroundColor: '#F4F7FE', border: '1px solid transparent', borderRadius: '14px', outline: 'none', color: '#475569', cursor: 'pointer' }}
-                          >
-                            <option value="TODAS">Prioridad: Todas</option>
-                            <option value="ALTA">Crítica / Alta</option>
-                            <option value="MEDIA">Media</option>
-                            <option value="BAJA">Baja</option>
-                          </select>
-                        </div>
-                      </div>
-                    </div>
+              <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 12 }}>
+                {/* Mapa */}
+                <div className="panel" style={{ flex: 1, minWidth: 0, position: "relative", overflow: "hidden" }}>
+                  <Mapa
+                    tickets={filtrados}
+                    onSeleccionar={seleccionar}
+                    seleccionadoId={seleccionadoId}
+                    enfoque={detalle && detalle.latitud != null ? [detalle.latitud, detalle.longitud!] : null}
+                    cercanos={cercanos}
+                  />
+                </div>
 
-                    <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', backgroundColor: '#F9FAFC' }}>
-                      {cargando ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', gap: '8px' }}>
-                          <div style={{ width: '20px', height: '20px', border: '2px solid #0284c7', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-                          <p style={{ fontSize: '11px', fontWeight: 'bold', color: '#94a3b8' }}>CARGANDO...</p>
-                        </div>
-                      ) : ticketsFiltrados.length === 0 ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', border: '2px dashed #e2e8f0', borderRadius: '16px', padding: '24px', textAlign: 'center' }}>
-                          <FiAlertTriangle size={28} color="#cbd5e1" style={{ marginBottom: '8px' }} />
-                          <p style={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b', margin: 0 }}>Sin coincidencias</p>
-                          <p style={{ fontSize: '10px', color: '#94a3b8', margin: '4px 0 0 0' }}>Prueba ajustando los filtros</p>
-                        </div>
-                      ) : (
-                        ticketsFiltrados.map((ticket) => {
-                          const uiState = obtenerEstadoVisual(ticket);
-                          return (
-                            <div 
-                              key={ticket.id} 
-                              onClick={() => abrirDetalle(ticket.id, ticket.latitud, ticket.longitud)} 
-                              style={{ backgroundColor: 'white', border: '1px solid #f1f5f9', padding: '16px', borderRadius: '16px', cursor: 'pointer', transition: 'all 0.2s', boxShadow: '0 2px 4px rgba(0,0,0,0.01)' }}
-                            >
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                                <span style={{ fontSize: '12px', fontWeight: 900, color: '#1e293b' }}>{ticket.codigoTicket}</span>
-                                <span style={{ fontSize: '9px', fontWeight: 900, padding: '4px 10px', borderRadius: '10px', border: '1px solid', ...obtenerEstiloPrioridad(ticket.prioridadIA) }}>
-                                  {ticket.prioridadIA}
-                                </span>
+                {/* Bandeja / Expediente */}
+                <div className="panel" style={{ width: 430, flexShrink: 0, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+                  {detalle ? (
+                    <DetalleTicket
+                      key={detalle.id}
+                      ticket={detalle}
+                      ahora={ahora}
+                      onCerrar={cerrarDetalle}
+                      cargando={cargandoDetalle}
+                      cercanos={cercanos}
+                      onVerCercano={seleccionar}
+                      acciones={
+                        <div className="columna" style={{ gap: 10 }}>
+                          {!cerrado ? (
+                            <>
+                              <div>
+                                <div className="fila entre" style={{ marginBottom: 6 }}>
+                                  <span className="rotulo">Derivar a departamento</span>
+                                  {recomendado && <span className="fila" style={{ gap: 4, fontSize: 10.5, color: "var(--acento)", fontWeight: 600 }}><FiCpu size={11} /> IA sugiere {departamentoInfo(recomendado)?.corto}</span>}
+                                </div>
+                                <div className="fila" style={{ gap: 6 }}>
+                                  <select className="select" value={deptoDestino} onChange={e => setDeptoDestino(e.target.value ? Number(e.target.value) : "")} style={{ borderLeft: deptoDestino ? `4px solid ${departamentoInfo(Number(deptoDestino))?.color}` : undefined }}>
+                                    <option value="">Seleccionar departamento</option>
+                                    {DEPARTAMENTOS.map(d => <option key={d.id} value={d.id}>{d.nombre}{d.id === recomendado ? " (sugerido)" : ""}</option>)}
+                                  </select>
+                                  <button className="btn btn-primario" onClick={derivar} disabled={procesando || !deptoDestino || (deptoDestino === detalle.departamentoId && detalle.estado !== "PENDIENTE")}>
+                                    <FiSend size={13} /> {detalle.estado === "PENDIENTE" ? "Derivar" : "Cambiar"}
+                                  </button>
+                                </div>
                               </div>
-                              
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px' }}>
-                                <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#0284c7' }}></div>
-                                <span style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>
-                                  {ticket.categoria?.nombre || 'Clasificación Pendiente'}
-                                </span>
+                              <div>
+                                <span className="rotulo">Prioridad {detalle.prioridadFinal ? "(ajustada)" : "(sugerida por IA)"}</span>
+                                <div className="segmentos" style={{ display: "flex", marginTop: 6 }}>
+                                  {ORDEN_PRIORIDADES.map(p => (
+                                    <button key={p} className={`segmento${prioridadDe(detalle) === p ? " activo" : ""}`} style={{ flex: 1, ...(prioridadDe(detalle) === p ? { background: PRIORIDADES[p].color } : {}) }}
+                                      disabled={procesando} onClick={() => prioridadDe(detalle) !== p && actualizar({ prioridadFinal: p }, `Prioridad: ${PRIORIDADES[p].etiqueta}`)}>
+                                      {PRIORIDADES[p].etiqueta}
+                                    </button>
+                                  ))}
+                                </div>
                               </div>
-                              
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '10px', borderTop: '1px solid #f8fafc', fontSize: '11px' }}>
-                                <span style={{ padding: '4px 10px', borderRadius: '8px', border: `1px solid ${uiState.border}`, backgroundColor: uiState.bg, color: uiState.text, fontSize: '9px', fontWeight: 900, letterSpacing: '0.5px' }}>
-                                  {uiState.label}
-                                </span>
-                                <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                  <FiPhone /> {ticket.ciudadano?.telefono?.replace('569', '+56 9 ')}
-                                </span>
+                              <div className="fila" style={{ gap: 6 }}>
+                                <button className="btn btn-secundario btn-sm crece" onClick={() => { setTextoModal(""); setModal("NOTA"); }}><FiEdit3 size={12} /> Nota interna</button>
+                                <button className="btn btn-peligro-borde btn-sm crece" onClick={() => { setTextoModal(""); setModal("DESCARTAR"); }}><FiSlash size={12} /> Descartar</button>
                               </div>
+                            </>
+                          ) : (
+                            <div className="fila" style={{ gap: 6 }}>
+                              <button className="btn btn-secundario btn-sm crece" onClick={() => { setTextoModal(""); setModal("NOTA"); }}><FiEdit3 size={12} /> Nota interna</button>
+                              <button className="btn btn-oscuro btn-sm crece" onClick={() => { setTextoModal(""); setModal("REABRIR"); }}><FiRotateCcw size={12} /> Reabrir caso</button>
                             </div>
-                          )
-                        })
-                      )}
-                    </div>
-                  </>
-                )}
-
-                {ticketSeleccionado && (
-                  <div style={{ display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'white' }}>
-                    
-                    <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F8FAFC' }}>
-                      <div>
-                        <span style={{ fontSize: '9px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 900, display: 'block', marginBottom: '2px' }}>EXPEDIENTE OPERATIVO</span>
-                        <h3 style={{ fontSize: '16px', fontWeight: 900, color: '#1e293b', margin: 0 }}>{ticketSeleccionado.codigoTicket}</h3>
-                      </div>
-                      <button 
-                        onClick={cerrarDetalle} 
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#475569', fontSize: '11px', fontWeight: 'bold', backgroundColor: 'white', border: '1px solid #e2e8f0', padding: '8px 14px', borderRadius: '12px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
-                      >
-                        <FiArrowLeft size={14} /> Volver
-                      </button>
-                    </div>
-
-                    <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', backgroundColor: '#ffffff' }}>
-                      
-                      <div style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '16px', padding: '16px', boxShadow: '0 4px 6px -1px rgba(217,119,6,0.1)' }}>
-                         <h4 style={{ fontSize: '10px', fontWeight: 900, color: '#d97706', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <FiCpu size={14} /> DICTAMEN DE INTELIGENCIA ARTIFICIAL
-                        </h4>
-                        <p style={{ fontSize: '12px', color: '#92400e', lineHeight: 1.5, margin: 0, fontWeight: 500 }}>
-                          {ticketSeleccionado.analisisIA}
-                        </p>
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                        <div style={{ backgroundColor: '#F8FAFC', padding: '12px', border: '1px solid #e2e8f0', borderRadius: '14px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                          <span style={{ fontSize: '9px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 900, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}><FiPhone size={10} color="#0ea5e9" /> CIUDADANO</span>
-                          <span style={{ fontSize: '12px', fontFamily: 'monospace', fontWeight: 'bold', color: '#1e293b' }}>{ticketSeleccionado.ciudadano.telefono.replace('569', '+56 9 ')}</span>
+                          )}
                         </div>
-                        <div style={{ backgroundColor: '#F8FAFC', padding: '12px', border: '1px solid #e2e8f0', borderRadius: '14px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                          <span style={{ fontSize: '9px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 900, marginBottom: '4px' }}>PRIORIDAD</span>
-                          <span style={{ fontSize: '10px', fontWeight: 900, padding: '3px 8px', borderRadius: '8px', border: '1px solid', width: 'fit-content', ...obtenerEstiloPrioridad(ticketSeleccionado.prioridadIA) }}>
-                            {ticketSeleccionado.prioridadIA}
-                          </span>
+                      }
+                    />
+                  ) : (
+                    <>
+                      <div style={{ padding: 12, borderBottom: "1px solid var(--borde)", display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div className="fila entre">
+                          <span className="titulo-3">Bandeja de reportes</span>
+                          <span className="mono texto-3" style={{ fontSize: 11 }}>{filtrados.length} de {tickets.length}</span>
                         </div>
-                      </div>
-
-                      <div>
-                        <h4 style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <FiMessageSquare size={14} color="#10b981" /> HISTORIAL DE CONVERSACIÓN
-                        </h4>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: '#e2e8f0', padding: '16px', borderRadius: '16px', backgroundImage: 'url("https://www.transparenttextures.com/patterns/cubes.png")' }}>
-                          {renderizarChat(ticketSeleccionado.descripcionUsuario)}
+                        <div className="input-con-icono">
+                          <FiSearch size={14} />
+                          <input ref={busquedaRef} className="input" placeholder="Código, teléfono o texto  ( / )" value={texto} onChange={e => setTexto(e.target.value)} />
                         </div>
-                      </div>
-
-                      {ticketSeleccionado.evidencias && ticketSeleccionado.evidencias.length > 0 && (
-                        <div>
-                          <h4 style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <FiImage size={14} color="#6366f1" /> EVIDENCIA GRÁFICA
-                          </h4>
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                            {ticketSeleccionado.evidencias.map((ev: any) => (
-                              <img key={ev.id} src={ev.url} alt="Evidencia" style={{ height: '140px', width: '100%', objectFit: 'cover', borderRadius: '14px', border: '1px solid #e2e8f0' }} />
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                          <select className="select" style={{ height: 32 }} value={filtroEstado} onChange={e => setFiltroEstado(e.target.value as any)}>
+                            <option value="ACTIVOS">Activos</option>
+                            <option value="TODOS">Todos los estados</option>
+                            {ORDEN_ESTADOS.map(e => <option key={e} value={e}>{ESTADOS[e].etiqueta}</option>)}
+                          </select>
+                          <select className="select" style={{ height: 32 }} value={filtroPrioridad} onChange={e => setFiltroPrioridad(e.target.value as any)}>
+                            <option value="TODAS">Toda prioridad</option>
+                            {ORDEN_PRIORIDADES.map(p => <option key={p} value={p}>{PRIORIDADES[p].etiqueta}</option>)}
+                          </select>
+                          <select className="select" style={{ height: 32 }} value={filtroCategoria} onChange={e => setFiltroCategoria(e.target.value)}>
+                            <option value="TODAS">Toda categoría</option>
+                            {CATEGORIAS.map(c => <option key={c.nombre} value={c.nombre}>{c.nombre}</option>)}
+                          </select>
+                          <select className="select" style={{ height: 32 }} value={String(filtroDepto)} onChange={e => setFiltroDepto(e.target.value === "TODOS" || e.target.value === "SIN" ? (e.target.value as any) : Number(e.target.value))}>
+                            <option value="TODOS">Todo departamento</option>
+                            <option value="SIN">Sin departamento</option>
+                            {DEPARTAMENTOS.map(d => <option key={d.id} value={d.id}>{d.nombre}</option>)}
+                          </select>
+                        </div>
+                        <div className="fila entre">
+                          <div className="segmentos">
+                            {([["URGENCIA", "Urgencia"], ["RECIENTES", "Recientes"], ["ANTIGUOS", "Antiguos"]] as const).map(([id, et]) => (
+                              <button key={id} className={`segmento${orden === id ? " activo" : ""}`} style={{ height: 26, fontSize: 10.5 }} onClick={() => setOrden(id)}>{et}</button>
                             ))}
                           </div>
+                          {hayFiltros ? <button className="btn btn-fantasma btn-sm" style={{ height: 26 }} onClick={limpiarFiltros}>Limpiar filtros</button>
+                            : soloAtrasados ? null : <span className="texto-3" style={{ fontSize: 11 }}>Ordenado por {orden.toLowerCase()}</span>}
                         </div>
-                      )}
-
-                      <div>
-                        <h4 style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 12px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <FiClock size={14} color="#0ea5e9" /> TRAZABILIDAD
-                        </h4>
-                        <div style={{ borderLeft: '2px solid #e2e8f0', marginLeft: '8px', paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                          {ticketSeleccionado.historial?.map((h: any) => (
-                            <div key={h.id} style={{ position: 'relative' }}>
-                              <div style={{ position: 'absolute', left: '-23px', top: '2px', width: '8px', height: '8px', backgroundColor: '#94a3b8', borderRadius: '50%', border: '2px solid white' }}></div>
-                              <p style={{ fontSize: '11px', fontWeight: 900, color: '#1e293b', margin: 0 }}>{h.estadoNuevo.replace('_', ' ')}</p>
-                              <p style={{ fontSize: '9px', color: '#94a3b8', fontFamily: 'monospace', margin: '2px 0 0 0' }}>{new Date(h.createdAt).toLocaleString()}</p>
-                            </div>
-                          ))}
-                          <div style={{ position: 'relative' }}>
-                            <div style={{ position: 'absolute', left: '-23px', top: '2px', width: '8px', height: '8px', backgroundColor: '#0ea5e9', borderRadius: '50%', border: '2px solid white', boxShadow: '0 0 6px rgba(14,165,233,0.5)' }}></div>
-                            <p style={{ fontSize: '11px', fontWeight: 900, color: '#1e293b', margin: 0 }}>Ingresado vía WhatsApp (IA)</p>
-                            <p style={{ fontSize: '9px', color: '#94a3b8', fontFamily: 'monospace', margin: '2px 0 0 0' }}>{new Date(ticketSeleccionado.createdAt).toLocaleString()}</p>
-                          </div>
-                        </div>
+                        {soloAtrasados && <div className="fila" style={{ fontSize: 11, color: "var(--peligro)", gap: 6 }}><FiAlertTriangle size={12} /> Mostrando solo casos fuera de plazo</div>}
                       </div>
-                    </div>
 
-                    {ticketSeleccionado.estado !== 'RESUELTO' && (
-                      <div style={{ padding: '20px', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
-                        <label style={{ fontSize: '10px', fontWeight: 900, color: '#475569', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px', display: 'block' }}>
-                          PANEL DE DESPACHO MUNICIPAL
-                        </label>
-
-                        <div style={{ backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', padding: '10px 14px', borderRadius: '12px', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: '10px', fontWeight: 800, color: '#1e40af', textTransform: 'uppercase' }}>
-                            🤖 RECOMENDACIÓN IA:
-                          </span>
-                          <span style={{ fontSize: '11px', fontWeight: 900, color: '#1d4ed8', backgroundColor: '#dbeafe', padding: '4px 10px', borderRadius: '8px' }}>
-                            {ticketSeleccionado.departamento?.nombre || "Sin recomendación"}
-                          </span>
-                        </div>
-
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                          <select 
-                            value={departamentoDerivacion}
-                            onChange={(e) => setDepartamentoDerivacion(e.target.value)}
-                            style={{ width: '100%', padding: '14px', backgroundColor: 'white', color: departamentoDerivacion === "SIN ASIGNAR" ? '#dc2626' : '#1e293b', border: departamentoDerivacion === "SIN ASIGNAR" ? '1px solid #fca5a5' : '1px solid #cbd5e1', fontSize: '12px', fontWeight: 700, borderRadius: '12px', outline: 'none', cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}
-                          >
-                            <option value="SIN ASIGNAR">-- SIN ASIGNAR DEPARTAMENTO --</option>
-                            <option value="SEGURIDAD PÚBLICA">Derivar a: SEGURIDAD PÚBLICA</option>
-                            <option value="ASEO Y ORNATO">Derivar a: ASEO Y ORNATO (DIMAO)</option>
-                            <option value="TRANSITO">Derivar a: DIRECCIÓN DE TRÁNSITO</option>
-                            <option value="OBRAS MUNICIPALES">Derivar a: OBRAS MUNICIPALES (DOM)</option>
-                          </select>
-                          
-                          <button 
-                            onClick={() => derivarTicket(ticketSeleccionado.id)}
-                            style={{ width: '100%', backgroundColor: departamentoDerivacion === "SIN ASIGNAR" ? '#94a3b8' : '#2563eb', color: 'white', padding: '14px', borderRadius: '12px', border: 'none', fontWeight: 900, fontSize: '13px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: departamentoDerivacion === "SIN ASIGNAR" ? 'not-allowed' : 'pointer', boxShadow: '0 4px 6px -1px rgba(37,99,235,0.3)', transition: 'background-color 0.2s' }}
-                            onMouseOver={(e) => {
-                              if (departamentoDerivacion !== "SIN ASIGNAR") e.currentTarget.style.backgroundColor = '#1d4ed8';
-                            }}
-                            onMouseOut={(e) => {
-                              if (departamentoDerivacion !== "SIN ASIGNAR") e.currentTarget.style.backgroundColor = '#2563eb';
-                            }}
-                          >
-                            <FiSend size={16} /> CONFIRMAR DESPACHO A TERRENO
-                          </button>
-                        </div>
+                      <div className="desplazable" style={{ flex: 1, padding: 10, display: "flex", flexDirection: "column", gap: 6, background: "var(--superficie-2)" }}>
+                        {cargando ? <Esqueleto alto={92} filas={6} /> : filtrados.length === 0 ? (
+                          <Vacio icono={<FiInbox size={22} />} titulo={tickets.length ? "Sin coincidencias" : "Sin reportes"} texto={tickets.length ? "Ajusta o limpia los filtros." : "Los reportes de WhatsApp aparecerán aquí al instante."}>
+                            {hayFiltros && <button className="btn btn-secundario btn-sm" onClick={limpiarFiltros}>Limpiar filtros</button>}
+                          </Vacio>
+                        ) : filtrados.slice(0, 150).map((t, i) => {
+                          const cat = categoriaInfo(t.categoria?.nombre);
+                          const d = departamentoInfo(t.departamentoId);
+                          const p = PRIORIDADES[prioridadDe(t)];
+                          return (
+                            <button key={t.id} onClick={() => seleccionar(t.id)}
+                              className={`item-lista anim-arriba${nuevos.has(t.id) ? " anim-destello" : ""}`}
+                              style={{ ["--color-item" as any]: cat.color, ["--i" as any]: Math.min(i, 14) }}>
+                              <div className="fila entre">
+                                <span className="fila" style={{ gap: 8 }}>
+                                  <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{t.codigoTicket}</span>
+                                  {nuevos.has(t.id) && <span className="insignia insignia-solida" style={{ background: "var(--acento)", height: 18, fontSize: 9 }}>Nuevo</span>}
+                                </span>
+                                <span className="mono texto-3" style={{ fontSize: 10.5 }}>{tiempoRelativo(t.createdAt, ahora)}</span>
+                              </div>
+                              <div className="fila" style={{ gap: 6, marginTop: 6 }}>
+                                <span style={{ color: cat.color, display: "inline-flex" }}><Icono nombre={cat.icono} size={14} /></span>
+                                <span style={{ fontWeight: 600, fontSize: 12.5 }} className="truncar">{cat.nombre}</span>
+                                <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: p.color }}>{p.etiqueta}</span>
+                              </div>
+                              <div className="dos-lineas texto-2" style={{ fontSize: 11.5, marginTop: 4 }}>{t.analisisIA || resumenDescripcion(t.descripcionUsuario)}</div>
+                              <div className="fila entre" style={{ marginTop: 8, gap: 8 }}>
+                                <span className="fila" style={{ gap: 6, minWidth: 0 }}>
+                                  <InsigniaEstado estado={t.estado} />
+                                  {d && <span className="truncar texto-3" style={{ fontSize: 10.5 }}><span className="punto" style={{ background: d.color, marginRight: 4 }} />{d.corto}</span>}
+                                </span>
+                                {ESTADOS_ACTIVOS.includes(t.estado) ? <IndicadorSla ticket={t} ahora={ahora} /> : <span className="mono texto-3" style={{ fontSize: 10.5 }}>{formatearTelefono(t.ciudadano?.telefono)}</span>}
+                              </div>
+                            </button>
+                          );
+                        })}
+                        {filtrados.length > 150 && <div className="texto-3" style={{ textAlign: "center", fontSize: 11, padding: 8 }}>Mostrando 150 de {filtrados.length}. Usa los filtros para acotar.</div>}
                       </div>
-                    )}
-
-                  </div>
-                )}
+                    </>
+                  )}
+                </div>
               </div>
             </>
           )}
 
-          {vistaActiva === 'KANBAN' && (
-              <div style={{ flex: 1, backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '24px', padding: '24px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                <div style={{ marginBottom: '20px' }}>
-                  <h2 style={{ fontSize: '16px', fontWeight: 900, color: '#1e293b', margin: '0 0 4px 0' }}>Flujo Operativo de Monitoreo</h2>
-                  <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>Haz clic en un ticket para ver su detalle e inspeccionarlo en el visor territorial.</p>
-                </div>
-                <Kanban 
-                  tickets={ticketsFiltrados} 
-                  onTicketSelect={(id) => {
-                    const t = ticketsFiltrados.find(x => x.id === id);
-                    if(t) {
-                      abrirDetalle(t.id, t.latitud, t.longitud);
-                      setVistaActiva('MAPA');
-                    }
-                  }} 
-                />
-              </div>
-            )}
-
-          {vistaActiva === 'ESTADISTICA' && (
-              <div style={{ flex: 1, overflow: 'hidden' }}>
-                <Estadisticas tickets={ticketsFiltrados} />
-              </div>
+          {vista === "KANBAN" && (
+            <div className="panel anim-aparecer" style={{ flex: 1, minHeight: 0, padding: 14 }}>
+              <Kanban tickets={tickets} ahora={ahora} onSeleccionar={id => { setVista("OPERACIONES"); seleccionar(id); }} />
+            </div>
           )}
 
-          {vistaActiva === 'ADMINISTRACION' && (session?.user as any)?.role === 'ADMINISTRADOR' && (
-              <div style={{ flex: 1, overflow: 'hidden' }}>
-                <AdminPanel />
-              </div>
+          {vista === "ESTADISTICAS" && (
+            <div className="anim-aparecer" style={{ flex: 1, minHeight: 0 }}>
+              <Estadisticas tickets={tickets} ahora={ahora} />
+            </div>
           )}
 
+          {vista === "ADMINISTRACION" && (
+            <div className="anim-aparecer" style={{ flex: 1, minHeight: 0 }}>
+              <AdminPanel tickets={tickets} ahora={ahora} miId={perfil.id} />
+            </div>
+          )}
         </div>
       </main>
-  </div>
+
+      {/* =================== MODALES =================== */}
+      <Modal
+        abierto={!!modal}
+        onCerrar={() => setModal(null)}
+        titulo={modal === "DESCARTAR" ? "Descartar reporte" : modal === "NOTA" ? "Agregar nota interna" : "Reabrir caso"}
+        subtitulo={detalle?.codigoTicket}
+        pie={
+          <>
+            <button className="btn btn-fantasma" onClick={() => setModal(null)}>Cancelar</button>
+            <button className={`btn ${modal === "DESCARTAR" ? "btn-peligro" : "btn-primario"}`} onClick={confirmarModal}
+              disabled={procesando || (modal !== "REABRIR" && textoModal.trim().length < 5)}>
+              {modal === "DESCARTAR" ? "Descartar y avisar al vecino" : modal === "NOTA" ? "Guardar nota" : "Reabrir"}
+            </button>
+          </>
+        }
+      >
+        {modal === "DESCARTAR" && (
+          <>
+            <p style={{ margin: 0, fontSize: 12.5, color: "var(--texto-2)" }}>El vecino recibirá el motivo por WhatsApp. Elige uno o escríbelo.</p>
+            <div className="columna" style={{ gap: 4 }}>
+              {MOTIVOS_DESCARTE.map(m => (
+                <button key={m} className="item-lista" onClick={() => setTextoModal(m)} style={{ padding: "8px 12px 8px 16px", ["--color-item" as any]: textoModal === m ? "var(--peligro)" : "var(--borde)", borderColor: textoModal === m ? "var(--peligro)" : undefined, fontSize: 12.5 }}>{m}</button>
+              ))}
+            </div>
+          </>
+        )}
+        {modal === "NOTA" && <p style={{ margin: 0, fontSize: 12.5, color: "var(--texto-2)" }}>Queda en la trazabilidad del caso. El vecino no la ve.</p>}
+        {modal === "REABRIR" && <p style={{ margin: 0, fontSize: 12.5, color: "var(--texto-2)" }}>El caso vuelve a revisión en su departamento, sin funcionario asignado, y se avisa al vecino.</p>}
+        <textarea className="textarea" autoFocus value={textoModal} onChange={e => setTextoModal(e.target.value)} maxLength={500}
+          placeholder={modal === "DESCARTAR" ? "Motivo del descarte" : modal === "NOTA" ? "Escribe la nota" : "Motivo (opcional)"} />
+        <div className="texto-3 mono" style={{ fontSize: 10.5, textAlign: "right", marginTop: -8 }}>{textoModal.length}/500</div>
+      </Modal>
+    </div>
   );
 }

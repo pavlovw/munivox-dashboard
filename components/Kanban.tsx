@@ -1,405 +1,118 @@
 "use client";
 
-import React, { useState, useMemo } from 'react';
-import { 
-  FiClock, 
-  FiEye, 
-  FiTruck, 
-  FiCheckCircle, 
-  FiMapPin, 
-  FiCamera, 
-  FiSearch, 
-  FiFilter, 
-  FiArrowRight,
-  FiAlertOctagon
-} from 'react-icons/fi';
+import React, { useMemo, useState } from "react";
+import { FiSearch, FiImage, FiUser } from "react-icons/fi";
+import type { Ticket } from "../lib/tipos";
+import { ESTADOS, ORDEN_ESTADOS, DEPARTAMENTOS, PRIORIDADES, categoriaInfo, departamentoInfo, prioridadDe, slaDe, tiempoRelativo, normalizar, resumenDescripcion } from "../lib/constantes";
+import { Icono } from "./ui/Iconos";
+import { IndicadorSla } from "./ui/Comunes";
 
-export interface TicketKanban {
-  id: string;
-  codigoTicket: string;
-  estado: string;
-  prioridadIA: string;
-  analisisIA: string;
-  departamento?: string;
-  categoria?: string;
-  direccion?: string;
-  createdAt?: string | Date;
-  usuarioNombre?: string;
-  tieneImagenes?: boolean;
-  [key: string]: any;
+interface Props {
+  tickets: Ticket[];
+  ahora: number;
+  onSeleccionar: (id: string) => void;
 }
 
-interface KanbanProps {
-  tickets: any[];
-  onTicketSelect: (id: string) => void;
-  onEstadoChange?: (ticketId: string, nuevoEstado: string) => void;
-}
+export default function Kanban({ tickets, ahora, onSeleccionar }: Props) {
+  const [busqueda, setBusqueda] = useState("");
+  const [depto, setDepto] = useState<number | "TODOS">("TODOS");
+  const [soloAtrasados, setSoloAtrasados] = useState(false);
 
-export default function Kanban({ tickets, onTicketSelect, onEstadoChange }: KanbanProps) {
-  const [busqueda, setBusqueda] = useState('');
-  const [deptoFiltro, setDeptoFiltro] = useState<string>('TODOS');
-  const [draggedTicketId, setDraggedTicketId] = useState<string | null>(null);
+  const filtrados = useMemo(() => {
+    const q = normalizar(busqueda);
+    return tickets.filter(t => {
+      if (depto !== "TODOS" && t.departamentoId !== depto) return false;
+      if (soloAtrasados && (!slaDe(t, ahora).vencido || ["RESUELTO", "DESCARTADO"].includes(t.estado))) return false;
+      if (!q) return true;
+      return [t.codigoTicket, t.categoria?.nombre, t.analisisIA, t.descripcionUsuario, t.operadorAsignado?.nombre].some(v => normalizar(v).includes(q));
+    });
+  }, [tickets, busqueda, depto, soloAtrasados, ahora]);
 
-  // Columnas del flujo de despacho C4
-  const columnas = [
-    { id: 'PENDIENTE', titulo: 'Pendientes', color: '#e11d48', bg: '#fff1f2', border: '#fecdd3', icon: <FiClock /> },
-    { id: 'EN_REVISION', titulo: 'En Evaluación', color: '#0284c7', bg: '#f0f9ff', border: '#bae6fd', icon: <FiEye /> },
-    { id: 'DESPACHADO', titulo: 'En Terreno / Despachado', color: '#4f46e5', bg: '#eef2ff', border: '#c7d2fe', icon: <FiTruck /> },
-    { id: 'RESUELTO', titulo: 'Resueltos / Cerrados', color: '#059669', bg: '#ecfdf5', border: '#a7f3d0', icon: <FiCheckCircle /> }
-  ];
+  const columnas = useMemo(() => {
+    const grupos: Record<string, Ticket[]> = {};
+    ORDEN_ESTADOS.forEach(e => (grupos[e] = []));
+    filtrados.forEach(t => grupos[t.estado]?.push(t));
+    // Dentro de cada columna: primero lo más urgente, luego lo más antiguo
+    Object.values(grupos).forEach(g => g.sort((a, b) => PRIORIDADES[prioridadDe(b)].peso - PRIORIDADES[prioridadDe(a)].peso || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()));
+    return grupos;
+  }, [filtrados]);
 
-  // Convierte el nombre del departamento (texto u objeto {nombre}) en una clave estable
-  const getDeptoKey = (depto: any): string => {
-    const nombre = typeof depto === 'string' ? depto : depto?.nombre || '';
-    const n = nombre.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-    if (n.includes('ASEO') || n.includes('DIMAO')) return 'ASEO';
-    if (n.includes('TRANSITO')) return 'TRANSITO';
-    if (n.includes('SEGURIDAD')) return 'SEGURIDAD';
-    if (n.includes('OBRAS') || n === 'DOM') return 'OBRAS';
-    return '';
-  };
-
-  // Estilos visuales por Departamento
-  const getDeptoBadge = (depto: any) => {
-    switch (getDeptoKey(depto)) {
-      case 'SEGURIDAD': return { bg: '#1e3a8a', text: '#ffffff', label: 'Seguridad' };
-      case 'ASEO':      return { bg: '#047857', text: '#ffffff', label: 'Aseo y Ornato' };
-      case 'TRANSITO':  return { bg: '#6d28d9', text: '#ffffff', label: 'Tránsito' };
-      case 'OBRAS':     return { bg: '#c2410c', text: '#ffffff', label: 'Obras' };
-      default:          return { bg: '#475569', text: '#ffffff', label: 'Sin Asignar' };
-    }
-  };
-
-  // Estilos visuales por Prioridad IA
-  const getPrioridadStyle = (prioridad: string) => {
-    switch (prioridad?.toUpperCase()) {
-      case 'CRITICA':
-      case 'CRÍTICA':
-        return { bg: '#fef2f2', text: '#dc2626', border: '#fca5a5', isCritical: true };
-      case 'ALTA':
-        return { bg: '#fff1f2', text: '#e11d48', border: '#fecdd3', isCritical: false };
-      case 'MEDIA':
-        return { bg: '#fffbeb', text: '#d97706', border: '#fde68a', isCritical: false };
-      default:
-        return { bg: '#f8fafc', text: '#475569', border: '#e2e8f0', isCritical: false };
-    }
-  };
-
-  // Formateador de tiempo relativo
-  const getTiempoTranscurrido = (dateInput?: string | Date) => {
-    if (!dateInput) return '';
-    const date = new Date(dateInput);
-    const diffMin = Math.floor((new Date().getTime() - date.getTime()) / 60000);
-    if (diffMin < 1) return 'Ahora';
-    if (diffMin < 60) return `Hace ${diffMin}m`;
-    const diffHoras = Math.floor(diffMin / 60);
-    if (diffHoras < 24) return `Hace ${diffHoras}h`;
-    return `Hace ${Math.floor(diffHoras / 24)}d`;
-  };
-
-  // Filtrado de tickets (los campos de la BD pueden venir null: nunca llamar métodos sobre ellos directo)
-  const ticketsFiltrados = useMemo(() => {
-    const q = busqueda.toLowerCase();
-    return tickets
-      .map(t => ({
-        ...t,
-        analisisIA: t.analisisIA || t.descripcionUsuario || '',
-        direccion: t.direccion || '',
-        tieneImagenes: t.tieneImagenes || (t.evidencias?.length ?? 0) > 0,
-      }))
-      .filter(t => {
-        const cumpleBusqueda =
-          String(t.codigoTicket ?? '').toLowerCase().includes(q) ||
-          t.analisisIA.toLowerCase().includes(q) ||
-          t.direccion.toLowerCase().includes(q);
-        const cumpleDepto = deptoFiltro === 'TODOS' || getDeptoKey(t.departamento) === deptoFiltro;
-        return cumpleBusqueda && cumpleDepto;
-      });
-  }, [tickets, busqueda, deptoFiltro]);
-
-  // Manejo de Drag & Drop
-  const handleDragStart = (e: React.DragEvent, id: string) => {
-    e.dataTransfer.setData('text/plain', id);
-    setDraggedTicketId(id);
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-
-  const handleDrop = (e: React.DragEvent, nuevoEstado: string) => {
-    e.preventDefault();
-    const id = e.dataTransfer.getData('text/plain') || draggedTicketId;
-    if (id && onEstadoChange) {
-      onEstadoChange(id, nuevoEstado);
-    }
-    setDraggedTicketId(null);
-  };
+  const total = filtrados.length || 1;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: '100%', width: '100%' }}>
-      {/* BARRA SUPERIOR DE CONTROL DEL TABLERO KANBAN */}
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        flexWrap: 'wrap',
-        gap: '12px',
-        backgroundColor: '#ffffff', 
-        padding: '12px 20px', 
-        borderRadius: '14px', 
-        border: '1px solid #e2e8f0',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
-      }}>
-        {/* Buscador */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#f8fafc', padding: '8px 14px', borderRadius: '10px', border: '1px solid #cbd5e1', width: '280px' }}>
-          <FiSearch style={{ color: '#64748b' }} />
-          <input 
-            type="text" 
-            placeholder="Buscar por folio, resumen o calle..." 
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: '13px', width: '100%', color: '#0f172a' }}
-          />
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, gap: 12 }}>
+      {/* Controles */}
+      <div className="fila entre" style={{ flexWrap: "wrap", gap: 10 }}>
+        <div className="fila" style={{ gap: 10, flexWrap: "wrap" }}>
+          <div className="input-con-icono" style={{ width: 260 }}>
+            <FiSearch size={14} />
+            <input className="input" placeholder="Buscar código, texto o funcionario" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
+          </div>
+          <div className="segmentos">
+            <button className={`segmento${depto === "TODOS" ? " activo" : ""}`} onClick={() => setDepto("TODOS")}>Todos</button>
+            {DEPARTAMENTOS.map(d => (
+              <button key={d.id} className={`segmento${depto === d.id ? " activo" : ""}`} onClick={() => setDepto(d.id)}>{d.corto}</button>
+            ))}
+          </div>
+          <label className="fila" style={{ gap: 8, fontSize: 12, cursor: "pointer" }}>
+            <button className={`interruptor${soloAtrasados ? " activo" : ""}`} onClick={() => setSoloAtrasados(!soloAtrasados)} aria-label="Solo fuera de plazo" style={{ ["--ok" as any]: "var(--peligro)" }} />
+            Solo fuera de plazo
+          </label>
         </div>
-
-        {/* Filtros de Departamento */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <FiFilter style={{ color: '#64748b', fontSize: '14px' }} />
-          <span style={{ fontSize: '12px', fontWeight: 700, color: '#475569' }}>Departamento:</span>
-          {['TODOS', 'SEGURIDAD', 'ASEO', 'TRANSITO', 'OBRAS'].map(dept => (
-            <button
-              key={dept}
-              onClick={() => setDeptoFiltro(dept)}
-              style={{
-                padding: '5px 10px',
-                borderRadius: '8px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: '1px solid',
-                borderColor: deptoFiltro === dept ? '#2563eb' : '#e2e8f0',
-                backgroundColor: deptoFiltro === dept ? '#eff6ff' : '#ffffff',
-                color: deptoFiltro === dept ? '#1d4ed8' : '#64748b',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              {({ TODOS: 'Todos', SEGURIDAD: 'Seguridad', ASEO: 'Aseo y Ornato', TRANSITO: 'Tránsito', OBRAS: 'Obras' } as Record<string, string>)[dept]}
-            </button>
+        {/* Distribución del flujo */}
+        <div style={{ display: "flex", width: 280, height: 8, background: "var(--superficie-3)" }} title="Distribución por estado">
+          {ORDEN_ESTADOS.map(e => (
+            <span key={e} style={{ width: `${(columnas[e].length / total) * 100}%`, background: ESTADOS[e].color, transition: "width 0.6s var(--curva)" }} />
           ))}
         </div>
       </div>
 
-      {/* ÁREA PRINCIPAL DE COLUMNAS KANBAN */}
-      <div style={{ display: 'flex', gap: '16px', height: 'calc(100% - 60px)', width: '100%', overflowX: 'auto', paddingBottom: '8px' }}>
-        {columnas.map(col => {
-          const ticketsColumna = ticketsFiltrados.filter(t => t.estado === col.id);
-
+      {/* Tablero */}
+      <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: `repeat(${ORDEN_ESTADOS.length}, minmax(240px, 1fr))`, gap: 10, overflowX: "auto" }}>
+        {ORDEN_ESTADOS.map((estado, ci) => {
+          const e = ESTADOS[estado];
+          const lista = columnas[estado];
           return (
-            <div 
-              key={col.id} 
-              onDragOver={handleDragOver}
-              onDrop={(e) => handleDrop(e, col.id)}
-              style={{ 
-                minWidth: '320px', 
-                maxWidth: '360px',
-                flex: 1, 
-                display: 'flex', 
-                flexDirection: 'column', 
-                backgroundColor: '#F8FAFC', 
-                borderRadius: '16px', 
-                border: `1px solid ${col.border}`,
-                boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
-              }}
-            >
-              {/* Cabecera de Columna */}
-              <div style={{ 
-                padding: '14px 16px', 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'center', 
-                backgroundColor: '#ffffff', 
-                borderTopLeftRadius: '16px', 
-                borderTopRightRadius: '16px',
-                borderBottom: `2px solid ${col.color}`
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: col.color, fontWeight: 900, fontSize: '13px', letterSpacing: '0.3px' }}>
-                  <span style={{ fontSize: '16px' }}>{col.icon}</span>
-                  {col.titulo.toUpperCase()}
+            <div key={estado} className="anim-arriba" style={{ display: "flex", flexDirection: "column", minHeight: 0, background: "var(--superficie-2)", border: "1px solid var(--borde)", ["--i" as any]: ci }}>
+              <div style={{ padding: "10px 12px", borderTop: `3px solid ${e.color}`, background: "var(--superficie)", borderBottom: "1px solid var(--borde)" }}>
+                <div className="fila entre">
+                  <span style={{ fontWeight: 700, fontSize: 12.5 }}>{e.etiqueta}</span>
+                  <span className="mono" style={{ fontWeight: 600, fontSize: 12, background: e.color, color: "#fff", padding: "1px 7px" }}>{lista.length}</span>
                 </div>
-                <span style={{ 
-                  backgroundColor: col.bg, 
-                  color: col.color, 
-                  border: `1px solid ${col.border}`,
-                  padding: '3px 10px', 
-                  borderRadius: '20px', 
-                  fontSize: '11px', 
-                  fontWeight: 800 
-                }}>
-                  {ticketsColumna.length}
-                </span>
+                <div className="texto-3" style={{ fontSize: 11, marginTop: 2 }}>{e.descripcion}</div>
               </div>
-
-              {/* Lista de Tarjetas */}
-              <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px', overflowY: 'auto', flex: 1 }}>
-                {ticketsColumna.map(ticket => {
-                  const prioStyle = getPrioridadStyle(ticket.prioridadIA);
-                  const deptoBadge = getDeptoBadge(ticket.departamento);
-                  const tiempoRelativo = getTiempoTranscurrido(ticket.createdAt);
-
+              <div className="desplazable" style={{ flex: 1, padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                {lista.length === 0 && <div className="vacio" style={{ padding: 18, fontSize: 11.5 }}>Sin reportes</div>}
+                {lista.slice(0, 80).map((t, i) => {
+                  const cat = categoriaInfo(t.categoria?.nombre);
+                  const p = PRIORIDADES[prioridadDe(t)];
+                  const d = departamentoInfo(t.departamentoId);
                   return (
-                    <div 
-                      key={ticket.id} 
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, ticket.id)}
-                      onClick={() => onTicketSelect(ticket.id)}
-                      style={{ 
-                        backgroundColor: '#ffffff', 
-                        padding: '14px', 
-                        borderRadius: '12px', 
-                        border: prioStyle.isCritical ? '2px solid #ef4444' : '1px solid #e2e8f0', 
-                        cursor: 'grab', 
-                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
-                        position: 'relative'
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.transform = 'translateY(-2px)';
-                        e.currentTarget.style.boxShadow = '0 6px 12px rgba(0,0,0,0.08)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = 'translateY(0)';
-                        e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)';
-                      }}
-                    >
-                      {/* Fila 1: Folio + Badges */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span style={{ fontSize: '13px', fontWeight: 900, color: '#0f172a' }}>{ticket.codigoTicket}</span>
-                          {prioStyle.isCritical && (
-                            <span title="Emergencia de alta prioridad" style={{ color: '#ef4444', animation: 'pulse 1.5s infinite' }}>
-                              <FiAlertOctagon size={14} />
-                            </span>
-                          )}
-                        </div>
-                        
-                        <span style={{ 
-                          fontSize: '9px', 
-                          fontWeight: 800, 
-                          padding: '3px 7px', 
-                          borderRadius: '6px', 
-                          border: `1px solid ${prioStyle.border}`, 
-                          backgroundColor: prioStyle.bg,
-                          color: prioStyle.text
-                        }}>
-                          {ticket.prioridadIA}
+                    <button key={t.id} onClick={() => onSeleccionar(t.id)} className="item-lista anim-arriba"
+                      style={{ ["--color-item" as any]: cat.color, ["--i" as any]: Math.min(i, 12), padding: "10px 10px 10px 14px" }}>
+                      <div className="fila entre">
+                        <span className="mono" style={{ fontWeight: 600, fontSize: 12 }}>{t.codigoTicket}</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: p.color, textTransform: "uppercase", letterSpacing: "0.06em" }}>{p.etiqueta}</span>
+                      </div>
+                      <div className="fila" style={{ gap: 6, marginTop: 6 }}>
+                        <span style={{ color: cat.color, display: "inline-flex" }}><Icono nombre={cat.icono} size={14} /></span>
+                        <span className="truncar" style={{ fontSize: 12, fontWeight: 600 }}>{cat.nombre}</span>
+                      </div>
+                      <div className="dos-lineas texto-2" style={{ fontSize: 11.5, marginTop: 4 }}>{t.analisisIA || resumenDescripcion(t.descripcionUsuario)}</div>
+                      <div className="fila entre" style={{ marginTop: 8, paddingTop: 6, borderTop: "1px solid var(--borde)" }}>
+                        <span className="fila" style={{ gap: 6, fontSize: 10.5, color: "var(--texto-3)", minWidth: 0 }}>
+                          {d && <span style={{ width: 8, height: 8, background: d.color, flexShrink: 0 }} />}
+                          <span className="truncar">{t.operadorAsignado ? <><FiUser size={10} /> {t.operadorAsignado.nombre}</> : d?.corto || "Sin derivar"}</span>
+                          {(t.evidencias?.length || 0) > 0 && <FiImage size={10} />}
                         </span>
+                        {["RESUELTO", "DESCARTADO"].includes(t.estado)
+                          ? <span className="mono texto-3" style={{ fontSize: 10.5 }}>{tiempoRelativo(t.updatedAt || t.createdAt, ahora)}</span>
+                          : <IndicadorSla ticket={t} ahora={ahora} />}
                       </div>
-
-                      {/* Fila 2: Resumen Dictamen IA */}
-                      <p style={{ 
-                        fontSize: '11px', 
-                        color: '#334155', 
-                        lineHeight: '1.4',
-                        margin: '0 0 10px 0', 
-                        display: '-webkit-box', 
-                        WebkitLineClamp: 2, 
-                        WebkitBoxOrient: 'vertical', 
-                        overflow: 'hidden',
-                        fontWeight: 500
-                      }}>
-                        {ticket.analisisIA}
-                      </p>
-
-                      {/* Fila 3: Metadata (Ubicación / Evidencia / Tiempo) */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '10px', fontSize: '10px', color: '#64748b' }}>
-                        {ticket.direccion && (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            <FiMapPin style={{ flexShrink: 0, color: '#94a3b8' }} />
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{ticket.direccion}</span>
-                          </div>
-                        )}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
-                          {ticket.tieneImagenes && (
-                            <span style={{ display: 'flex', alignItems: 'center', gap: '3px', color: '#2563eb', fontWeight: 700 }}>
-                              <FiCamera /> Evidencia S3
-                            </span>
-                          )}
-                          {tiempoRelativo && (
-                            <span style={{ color: '#94a3b8', fontStyle: 'italic', marginLeft: 'auto' }}>
-                              {tiempoRelativo}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Fila 4: Footer de Tarjeta con Departamento y Clic directo de Avance */}
-                      <div style={{ 
-                        display: 'flex', 
-                        justifyContent: 'space-between', 
-                        alignItems: 'center', 
-                        paddingTop: '8px', 
-                        borderTop: '1px solid #f1f5f9' 
-                      }}>
-                        <span style={{ 
-                          backgroundColor: deptoBadge.bg, 
-                          color: deptoBadge.text, 
-                          padding: '2px 8px', 
-                          borderRadius: '4px', 
-                          fontSize: '9px', 
-                          fontWeight: 800,
-                          letterSpacing: '0.2px'
-                        }}>
-                          {deptoBadge.label}
-                        </span>
-
-                        {/* Botón rápido para mover de estado si se presiona */}
-                        {onEstadoChange && col.id !== 'RESUELTO' && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const siguienteEstado = 
-                                col.id === 'PENDIENTE' ? 'EN_REVISION' :
-                                col.id === 'EN_REVISION' ? 'DESPACHADO' : 'RESUELTO';
-                              onEstadoChange(ticket.id, siguienteEstado);
-                            }}
-                            title="Avanzar de estado"
-                            style={{
-                              border: 'none',
-                              background: '#f1f5f9',
-                              color: '#334155',
-                              padding: '4px 8px',
-                              borderRadius: '6px',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              fontSize: '10px',
-                              fontWeight: 700
-                            }}
-                          >
-                            Avanzar <FiArrowRight size={10} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
+                    </button>
                   );
                 })}
-
-                {ticketsColumna.length === 0 && (
-                  <div style={{ 
-                    textAlign: 'center', 
-                    padding: '30px 10px', 
-                    color: '#94a3b8', 
-                    fontSize: '11px', 
-                    fontWeight: 600,
-                    border: '2px dashed #e2e8f0',
-                    borderRadius: '12px',
-                    backgroundColor: '#ffffff'
-                  }}>
-                    Sin denuncias en esta etapa
-                  </div>
-                )}
+                {lista.length > 80 && <div className="texto-3" style={{ fontSize: 11, textAlign: "center", padding: 6 }}>y {lista.length - 80} más. Usa los filtros.</div>}
               </div>
             </div>
           );

@@ -1,422 +1,382 @@
 "use client";
 
-import React, { useState, useMemo, useRef } from 'react';
-import { 
-  FiActivity, 
-  FiPieChart, 
-  FiTrendingUp, 
-  FiAlertTriangle, 
-  FiDownload, 
-  FiCalendar,
-  FiClock,
-  FiTarget,
-  FiShield,
-  FiZap,
-  FiLayers
-} from 'react-icons/fi';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  PieChart, Pie, Cell, LineChart, Line, Legend, AreaChart, Area,
-  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
-} from 'recharts';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
+import React, { useMemo, useRef, useState } from "react";
+import { FiDownload, FiFileText, FiTrendingUp, FiClock, FiCheckSquare, FiStar, FiAlertTriangle, FiInbox } from "react-icons/fi";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend, ComposedChart, Line,
+} from "recharts";
+import type { Ticket } from "../lib/tipos";
+import {
+  ESTADOS, ORDEN_ESTADOS, PRIORIDADES, ORDEN_PRIORIDADES, DEPARTAMENTOS, CATEGORIAS, ESTADOS_ACTIVOS,
+  categoriaInfo, prioridadDe, slaDe, fechaCierre, fechaPrimeraGestion, calificacionDe, formatearTelefono, fechaHora,
+} from "../lib/constantes";
+import { unidadVecinalDe } from "../lib/geo";
+import { Kpi, Vacio } from "./ui/Comunes";
+import { useAvisos } from "./ui/Avisos";
 
-// Paletas de colores institucionales
-const COLORES_BASE = ['#0284c7', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#64748b', '#14b8a6', '#f43f5e'];
-const COLORES_PRIORIDAD: Record<string, string> = { 'CRITICA': '#ef4444', 'ALTA': '#f97316', 'MEDIA': '#eab308', 'BAJA': '#94a3b8' };
-const COLORES_ESTADO: Record<string, string> = { 'PENDIENTE': '#e11d48', 'EN_REVISION': '#0284c7', 'DESPACHADO': '#4f46e5', 'RESUELTO': '#059669' };
+const PERIODOS = [
+  { id: "HOY", etiqueta: "Hoy", dias: 0 },
+  { id: "7D", etiqueta: "7 días", dias: 7 },
+  { id: "30D", etiqueta: "30 días", dias: 30 },
+  { id: "90D", etiqueta: "90 días", dias: 90 },
+  { id: "365D", etiqueta: "1 año", dias: 365 },
+  { id: "TODO", etiqueta: "Todo", dias: -1 },
+];
 
-interface Ticket {
-  id: string;
-  codigoTicket: string;
-  estado: string;
-  prioridadIA: string;
-  analisisIA: string;
-  createdAt?: string | Date;
-  departamento?: { nombre: string };
-  categoria?: { nombre: string };
-  historial?: any[];
-}
+const EJE = { fontSize: 10.5, fill: "#7C889B", fontFamily: "var(--mono)" };
+const TOOLTIP = { contentStyle: { border: "1px solid #D8DEE6", boxShadow: "0 6px 18px -6px rgba(13,21,37,.18)", fontSize: 12, padding: "6px 10px" }, cursor: { fill: "rgba(29,78,216,0.06)" } };
+const ANIM = { isAnimationActive: true, animationDuration: 900, animationEasing: "ease-out" as const };
+const horas = (ms: number) => ms / 3600000;
 
-export default function Estadisticas({ tickets }: { tickets: Ticket[] }) {
-  const [filtroTiempo, setFiltroTiempo] = useState<string>('ESTA_SEMANA');
-  const [isExporting, setIsExporting] = useState(false);
-  const printRef = useRef<HTMLDivElement>(null);
+export default function Estadisticas({ tickets, ahora }: { tickets: Ticket[]; ahora: number }) {
+  const avisar = useAvisos();
+  const [periodo, setPeriodo] = useState("30D");
+  const [depto, setDepto] = useState<number | "TODOS">("TODOS");
+  const [exportando, setExportando] = useState(false);
+  const informe = useRef<HTMLDivElement>(null);
 
-  // 1. LÓGICA DE FILTRADO TEMPORAL
-  const ticketsFiltrados = useMemo(() => {
-    const ahora = new Date();
-    const hoy = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
-    
-    return tickets.filter(t => {
-      if (!t.createdAt) return true;
-      const fechaTicket = new Date(t.createdAt);
-      const diffDias = Math.floor((hoy.getTime() - fechaTicket.getTime()) / (1000 * 60 * 60 * 24));
+  const p = PERIODOS.find(x => x.id === periodo)!;
 
-      switch (filtroTiempo) {
-        case 'HOY': return diffDias === 0;
-        case 'ESTA_SEMANA': {
-          const diaSemana = hoy.getDay() === 0 ? 6 : hoy.getDay() - 1; // Lunes a Domingo
-          return diffDias <= diaSemana;
-        }
-        case 'ULTIMA_SEMANA': return diffDias <= 7;
-        case 'ULTIMO_MES': return diffDias <= 30;
-        case 'ULTIMOS_3_MESES': return diffDias <= 90;
-        case 'ULTIMOS_6_MESES': return diffDias <= 180;
-        case 'ULTIMOS_9_MESES': return diffDias <= 270;
-        case 'ULTIMO_ANO': return diffDias <= 365;
-        default: return true;
-      }
-    });
-  }, [tickets, filtroTiempo]);
+  const filtrados = useMemo(() => {
+    const hoy = new Date(ahora); hoy.setHours(0, 0, 0, 0);
+    const desde = p.dias === 0 ? hoy.getTime() : p.dias > 0 ? ahora - p.dias * 86400000 : 0;
+    return tickets.filter(t => new Date(t.createdAt).getTime() >= desde && (depto === "TODOS" || t.departamentoId === depto));
+  }, [tickets, p.dias, depto, ahora]);
 
-  // 2. CÁLCULO DE KPIs Y PROCESAMIENTO MULTIDIMENSIONAL
-  const { stats, graficos } = useMemo(() => {
-    // Variables para KPIs
-    const total = ticketsFiltrados.length;
-    let resueltos = 0, pendientes = 0, criticos = 0;
-    
-    // Diccionarios para Gráficos
-    const tendenciaDiaria: Record<string, any> = {};
-    const deptosCount: Record<string, number> = {};
-    const categorias: Record<string, number> = {};
-    const horas: Record<string, number> = {};
-    const estadosCount: Record<string, number> = { 'PENDIENTE': 0, 'EN_REVISION': 0, 'DESPACHADO': 0, 'RESUELTO': 0 };
-    const prioridadesCount: Record<string, number> = { 'CRITICA': 0, 'ALTA': 0, 'MEDIA': 0, 'BAJA': 0 };
-    const diasSemana: Record<string, number> = { 'Lunes': 0, 'Martes': 0, 'Miércoles': 0, 'Jueves': 0, 'Viernes': 0, 'Sábado': 0, 'Domingo': 0 };
-    const rendimientoDepto: Record<string, { depto: string, Resueltos: number, Activos: number }> = {};
+  const d = useMemo(() => {
+    const total = filtrados.length;
+    const resueltos = filtrados.filter(t => t.estado === "RESUELTO");
+    const descartados = filtrados.filter(t => t.estado === "DESCARTADO").length;
+    const activos = filtrados.filter(t => ESTADOS_ACTIVOS.includes(t.estado));
+    const atrasados = activos.filter(t => slaDe(t, ahora).vencido).length;
+    const criticos = activos.filter(t => prioridadDe(t) === "CRITICA").length;
 
-    ticketsFiltrados.forEach(t => {
-      // KPIs Básicos
-      if (t.estado === 'RESUELTO') resueltos++;
-      if (t.estado === 'PENDIENTE') pendientes++;
-      if (t.prioridadIA === 'ALTA' || t.prioridadIA === 'CRITICA') criticos++;
-      
-      const estadoNorm = t.estado || 'PENDIENTE';
-      if (estadosCount[estadoNorm] !== undefined) estadosCount[estadoNorm]++;
-      
-      const prioNorm = t.prioridadIA?.toUpperCase() === 'CRÍTICA' ? 'CRITICA' : (t.prioridadIA?.toUpperCase() || 'BAJA');
-      if (prioridadesCount[prioNorm] !== undefined) prioridadesCount[prioNorm]++;
+    const tiemposCierre = resueltos.map(t => (fechaCierre(t)?.getTime() || 0) - new Date(t.createdAt).getTime()).filter(x => x > 0);
+    const tiempoCierre = tiemposCierre.length ? horas(tiemposCierre.reduce((a, b) => a + b, 0) / tiemposCierre.length) : NaN;
+    const enPlazo = resueltos.filter(t => !slaDe(t, ahora).vencido).length;
+    const cumplimiento = resueltos.length ? (enPlazo / resueltos.length) * 100 : NaN;
 
-      // Departamentos y Rendimiento
-      const depto = t.departamento?.nombre || 'Sin Asignar';
-      deptosCount[depto] = (deptosCount[depto] || 0) + 1;
-      
-      if (!rendimientoDepto[depto]) rendimientoDepto[depto] = { depto, Resueltos: 0, Activos: 0 };
-      if (t.estado === 'RESUELTO') rendimientoDepto[depto].Resueltos++;
-      else rendimientoDepto[depto].Activos++;
+    const tiemposRespuesta = filtrados.map(t => { const f = fechaPrimeraGestion(t); return f ? f.getTime() - new Date(t.createdAt).getTime() : null; }).filter((x): x is number => x != null && x > 0);
+    const respuesta = tiemposRespuesta.length ? horas(tiemposRespuesta.reduce((a, b) => a + b, 0) / tiemposRespuesta.length) : NaN;
 
-      // Categorías
-      const cat = t.categoria?.nombre || 'Sin Clasificar';
-      categorias[cat] = (categorias[cat] || 0) + 1;
+    const notas = filtrados.map(calificacionDe).filter((x): x is number => x != null);
+    const satisfaccion = notas.length ? (notas.filter(n => n >= 5).length / notas.length) * 100 : NaN;
 
-      // Tiempo (Días, Fechas y Horas)
-      if (t.createdAt) {
-        const dateObj = new Date(t.createdAt);
-        // Tendencia diaria
-        const fecha = dateObj.toLocaleDateString('es-CL', { day: '2-digit', month: 'short' });
-        if (!tendenciaDiaria[fecha]) tendenciaDiaria[fecha] = { fecha, Ingresos: 0, Resueltos: 0 };
-        tendenciaDiaria[fecha].Ingresos++;
-        if (t.estado === 'RESUELTO') tendenciaDiaria[fecha].Resueltos++;
-
-        // Hora
-        const horaFormato = `${dateObj.getHours().toString().padStart(2, '0')}:00`;
-        horas[horaFormato] = (horas[horaFormato] || 0) + 1;
-
-        // Día de la Semana
-        const diasNombres = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-        diasSemana[diasNombres[dateObj.getDay()]]++;
-      }
+    // Tendencia (por hora si es "Hoy", por día en otro caso)
+    const porHora = p.dias === 0;
+    const cubos = new Map<string, { clave: string; etiqueta: string; Ingresos: number; Cierres: number }>();
+    const claveDe = (f: Date) => porHora ? `${f.getHours()}`.padStart(2, "0") : f.toISOString().slice(0, 10);
+    const etiquetaDe = (f: Date) => porHora ? `${String(f.getHours()).padStart(2, "0")}:00` : f.toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit" });
+    if (porHora) for (let h = 0; h < 24; h++) { const f = new Date(ahora); f.setHours(h); cubos.set(claveDe(f), { clave: claveDe(f), etiqueta: etiquetaDe(f), Ingresos: 0, Cierres: 0 }); }
+    else {
+      const dias = p.dias > 0 ? Math.min(p.dias, 120) : Math.min(120, Math.ceil((ahora - Math.min(...filtrados.map(t => new Date(t.createdAt).getTime()), ahora)) / 86400000) + 1);
+      for (let i = dias - 1; i >= 0; i--) { const f = new Date(ahora - i * 86400000); cubos.set(claveDe(f), { clave: claveDe(f), etiqueta: etiquetaDe(f), Ingresos: 0, Cierres: 0 }); }
+    }
+    filtrados.forEach(t => {
+      const c = cubos.get(claveDe(new Date(t.createdAt))); if (c) c.Ingresos++;
+      const fc = fechaCierre(t); if (fc && t.estado === "RESUELTO") { const c2 = cubos.get(claveDe(fc)); if (c2) c2.Cierres++; }
     });
 
-    const resolucionPorcentaje = total > 0 ? Math.round((resueltos / total) * 100) : 0;
-    
-    // Top Departamento
-    let topDepto = 'N/A';
-    let maxDepto = 0;
-    Object.entries(deptosCount).forEach(([d, count]) => {
-      if (d !== 'Sin Asignar' && count > maxDepto) { maxDepto = count; topDepto = d; }
+    const porEstado = ORDEN_ESTADOS.map(e => ({ nombre: ESTADOS[e].etiqueta, valor: filtrados.filter(t => t.estado === e).length, color: ESTADOS[e].color }));
+    const porPrioridad = ORDEN_PRIORIDADES.map(pr => ({ nombre: PRIORIDADES[pr].etiqueta, valor: filtrados.filter(t => prioridadDe(t) === pr).length, color: PRIORIDADES[pr].color }));
+
+    const porDepto = DEPARTAMENTOS.map(dep => {
+      const del = filtrados.filter(t => t.departamentoId === dep.id);
+      const res = del.filter(t => t.estado === "RESUELTO");
+      const ts = res.map(t => (fechaCierre(t)?.getTime() || 0) - new Date(t.createdAt).getTime()).filter(x => x > 0);
+      return {
+        nombre: dep.corto, color: dep.color,
+        Activos: del.filter(t => ESTADOS_ACTIVOS.includes(t.estado)).length,
+        Resueltos: res.length,
+        Atrasados: del.filter(t => ESTADOS_ACTIVOS.includes(t.estado) && slaDe(t, ahora).vencido).length,
+        "Horas promedio": ts.length ? Math.round(horas(ts.reduce((a, b) => a + b, 0) / ts.length) * 10) / 10 : 0,
+      };
     });
 
-    // Formateo para Recharts
+    const porCategoria = CATEGORIAS.map(c => ({ nombre: c.nombre, valor: filtrados.filter(t => categoriaInfo(t.categoria?.nombre).nombre === c.nombre).length, color: c.color }))
+      .filter(c => c.valor > 0).sort((a, b) => b.valor - a.valor);
+
+    const horasDia = Array.from({ length: 24 }, (_, h) => ({ hora: String(h).padStart(2, "0"), valor: 0 }));
+    const diasSemana = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"].map(n => ({ dia: n, valor: 0 }));
+    const uvs: Record<string, number> = {};
+    filtrados.forEach(t => {
+      const f = new Date(t.createdAt);
+      horasDia[f.getHours()].valor++;
+      diasSemana[(f.getDay() + 6) % 7].valor++;
+      const uv = unidadVecinalDe(t.latitud, t.longitud);
+      if (uv) uvs[uv] = (uvs[uv] || 0) + 1;
+    });
+    const porUV = Object.entries(uvs).map(([nombre, valor]) => ({ nombre, valor })).sort((a, b) => b.valor - a.valor).slice(0, 10);
+
+    // Ranking de funcionarios en terreno (según quién tenía el caso al resolverse)
+    const ranking: Record<string, { nombre: string; resueltos: number; ms: number; notas: number[] }> = {};
+    resueltos.forEach(t => {
+      const f = t.operadorAsignado; if (!f) return;
+      const r = (ranking[f.id] ||= { nombre: f.nombre, resueltos: 0, ms: 0, notas: [] });
+      r.resueltos++;
+      r.ms += Math.max(0, (fechaCierre(t)?.getTime() || 0) - new Date(t.createdAt).getTime());
+      const n = calificacionDe(t); if (n) r.notas.push(n);
+    });
+    const funcionarios = Object.values(ranking).sort((a, b) => b.resueltos - a.resueltos).slice(0, 8);
+
+    const satisf = [
+      { nombre: "Bien resuelto", valor: notas.filter(n => n === 5).length, color: "#2B8A3E" },
+      { nombre: "Regular", valor: notas.filter(n => n === 3).length, color: "#B7791F" },
+      { nombre: "No resuelto", valor: notas.filter(n => n === 1).length, color: "#C92A2A" },
+    ];
+
     return {
-      stats: { total, resueltos, pendientes, criticos, resolucionPorcentaje, topDepto },
-      graficos: {
-        tendencia: Object.values(tendenciaDiaria).sort((a, b) => a.fecha.localeCompare(b.fecha)),
-        deptos: Object.entries(deptosCount).map(([name, value]) => ({ name, value })),
-        rendimientoDeptos: Object.values(rendimientoDepto).filter(d => d.depto !== 'Sin Asignar'),
-        categorias: Object.entries(categorias).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 7),
-        horas: Object.entries(horas).map(([hora, cantidad]) => ({ hora, cantidad })).sort((a, b) => a.hora.localeCompare(b.hora)),
-        estados: [
-          { name: 'Pendiente (Cola)', value: estadosCount['PENDIENTE'] || 0, color: COLORES_ESTADO['PENDIENTE'] },
-          { name: 'En Evaluación', value: estadosCount['EN_REVISION'] || 0, color: COLORES_ESTADO['EN_REVISION'] },
-          { name: 'Despachado', value: estadosCount['DESPACHADO'] || 0, color: COLORES_ESTADO['DESPACHADO'] },
-          { name: 'Resuelto', value: estadosCount['RESUELTO'] || 0, color: COLORES_ESTADO['RESUELTO'] }
-        ],
-        prioridades: [
-          { name: 'CRÍTICA', value: prioridadesCount['CRITICA'] || 0, color: COLORES_PRIORIDAD['CRITICA'] },
-          { name: 'ALTA', value: prioridadesCount['ALTA'] || 0, color: COLORES_PRIORIDAD['ALTA'] },
-          { name: 'MEDIA', value: prioridadesCount['MEDIA'] || 0, color: COLORES_PRIORIDAD['MEDIA'] },
-          { name: 'BAJA', value: prioridadesCount['BAJA'] || 0, color: COLORES_PRIORIDAD['BAJA'] }
-        ],
-        diasSemana: [
-          { subject: 'Lun', A: diasSemana['Lunes'] },
-          { subject: 'Mar', A: diasSemana['Martes'] },
-          { subject: 'Mié', A: diasSemana['Miércoles'] },
-          { subject: 'Jue', A: diasSemana['Jueves'] },
-          { subject: 'Vie', A: diasSemana['Viernes'] },
-          { subject: 'Sáb', A: diasSemana['Sábado'] },
-          { subject: 'Dom', A: diasSemana['Domingo'] }
-        ]
-      }
+      total, resueltos: resueltos.length, descartados, activos: activos.length, atrasados, criticos,
+      tiempoCierre, cumplimiento, respuesta, satisfaccion, notas: notas.length,
+      tendencia: [...cubos.values()], porEstado, porPrioridad, porDepto, porCategoria, horasDia, diasSemana, porUV, funcionarios, satisf,
     };
-  }, [ticketsFiltrados]);
+  }, [filtrados, ahora, p.dias]);
 
-  // 3. GENERADOR DE REPORTE PDF
-  const generarPDF = async () => {
-    if (!printRef.current) return;
-    setIsExporting(true);
-    
+  // ------------------------------------------------------------------------
+  // EXPORTACIONES
+  // ------------------------------------------------------------------------
+  const exportarPDF = async () => {
+    if (!informe.current) return;
+    setExportando(true);
     try {
-      const canvas = await html2canvas(printRef.current, { scale: 2, useCORS: true, backgroundColor: '#F8FAFC' });
-      const imgData = canvas.toDataURL('image/png');
-      
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-      
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`MuniVox_Reporte_Inteligencia_${new Date().toLocaleDateString('es-CL')}.pdf`);
-    } catch (error) {
-      console.error("Error al generar PDF:", error);
-      alert("Hubo un error al generar el PDF.");
+      const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
+      const canvas = await html2canvas(informe.current, { scale: 2, useCORS: true, backgroundColor: "#ECEFF3" });
+      const pdf = new jsPDF("p", "mm", "a4");
+      const ancho = pdf.internal.pageSize.getWidth();
+      const altoPagina = pdf.internal.pageSize.getHeight();
+      const pxPorPagina = Math.floor((canvas.width * altoPagina) / ancho);
+      let y = 0, pagina = 0;
+      while (y < canvas.height) {
+        const trozo = document.createElement("canvas");
+        trozo.width = canvas.width;
+        trozo.height = Math.min(pxPorPagina, canvas.height - y);
+        trozo.getContext("2d")!.drawImage(canvas, 0, y, canvas.width, trozo.height, 0, 0, canvas.width, trozo.height);
+        if (pagina > 0) pdf.addPage();
+        pdf.addImage(trozo.toDataURL("image/png"), "PNG", 0, 0, ancho, (trozo.height * ancho) / canvas.width);
+        pdf.setFontSize(8); pdf.setTextColor(120);
+        pdf.text(`MuniVox | Central C4 Buin | Página ${pagina + 1}`, 10, altoPagina - 5);
+        y += pxPorPagina; pagina++;
+      }
+      pdf.save(`MuniVox_Informe_${new Date().toISOString().slice(0, 10)}.pdf`);
+      avisar({ titulo: "Informe PDF generado", tipo: "ok" });
+    } catch (e) {
+      console.error(e);
+      avisar({ titulo: "No se pudo generar el PDF", tipo: "error" });
     } finally {
-      setIsExporting(false);
+      setExportando(false);
     }
   };
 
+  const exportarCSV = () => {
+    const filas = [["codigo", "fecha_ingreso", "estado", "categoria", "departamento", "prioridad", "funcionario", "unidad_vecinal", "latitud", "longitud", "fecha_cierre", "horas_cierre", "dentro_de_plazo", "calificacion", "telefono"]];
+    filtrados.forEach(t => {
+      const fc = fechaCierre(t);
+      filas.push([
+        t.codigoTicket, fechaHora(t.createdAt), ESTADOS[t.estado]?.etiqueta || t.estado, t.categoria?.nombre || "", t.departamento?.nombre || "",
+        PRIORIDADES[prioridadDe(t)].etiqueta, t.operadorAsignado?.nombre || "", unidadVecinalDe(t.latitud, t.longitud) || "",
+        String(t.latitud ?? ""), String(t.longitud ?? ""), fc ? fechaHora(fc) : "",
+        fc ? (horas(fc.getTime() - new Date(t.createdAt).getTime())).toFixed(1) : "",
+        fc ? (slaDe(t, ahora).vencido ? "no" : "si") : "", String(calificacionDe(t) ?? ""), formatearTelefono(t.ciudadano?.telefono),
+      ]);
+    });
+    const csv = "﻿" + filas.map(f => f.map(v => `"${String(v).replace(/"/g, '""')}"`).join(";")).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    a.download = `MuniVox_Reportes_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const fmtHoras = (h: number) => (!Number.isFinite(h) ? NaN : h);
+
   return (
-    <div style={{ width: '100%', height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column', backgroundColor: '#F4F7FE' }}>
-      
-      {/* BARRA DE FILTROS SUPERIOR */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', padding: '16px 24px', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <FiCalendar size={18} color="#64748b" />
-          <span style={{ fontSize: '13px', fontWeight: 800, color: '#334155' }}>FILTRO TEMPORAL:</span>
-          <select 
-            value={filtroTiempo}
-            onChange={(e) => setFiltroTiempo(e.target.value)}
-            style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', backgroundColor: '#f8fafc', fontSize: '12px', fontWeight: 700, color: '#0f172a', outline: 'none', cursor: 'pointer' }}
-          >
-            <option value="HOY">Hoy</option>
-            <option value="ESTA_SEMANA">Esta Semana (Lun-Dom)</option>
-            <option value="ULTIMA_SEMANA">Últimos 7 días</option>
-            <option value="ULTIMO_MES">Último Mes</option>
-            <option value="ULTIMOS_3_MESES">Últimos 3 Meses</option>
-            <option value="ULTIMO_ANO">Último Año</option>
-            <option value="TODOS">Histórico Completo</option>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      {/* Controles */}
+      <div className="fila entre" style={{ flexWrap: "wrap", gap: 10, paddingBottom: 12 }}>
+        <div className="fila" style={{ gap: 10, flexWrap: "wrap" }}>
+          <div className="segmentos">
+            {PERIODOS.map(x => <button key={x.id} className={`segmento${periodo === x.id ? " activo" : ""}`} onClick={() => setPeriodo(x.id)}>{x.etiqueta}</button>)}
+          </div>
+          <select className="select" style={{ width: 200, height: 32 }} value={depto} onChange={e => setDepto(e.target.value === "TODOS" ? "TODOS" : Number(e.target.value))}>
+            <option value="TODOS">Todos los departamentos</option>
+            {DEPARTAMENTOS.map(x => <option key={x.id} value={x.id}>{x.nombre}</option>)}
           </select>
         </div>
-
-        <button 
-          onClick={generarPDF}
-          disabled={isExporting}
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: isExporting ? '#94a3b8' : '#ef4444', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '10px', fontSize: '12px', fontWeight: 800, cursor: isExporting ? 'not-allowed' : 'pointer', transition: 'background 0.2s', boxShadow: '0 2px 4px rgba(239,68,68,0.2)' }}
-        >
-          <FiDownload size={16} /> 
-          {isExporting ? 'PROCESANDO PDF...' : 'EXPORTAR REPORTE OFICIAL'}
-        </button>
+        <div className="fila">
+          <button className="btn btn-secundario btn-sm" onClick={exportarCSV} disabled={!filtrados.length}><FiFileText size={13} /> Exportar CSV</button>
+          <button className="btn btn-primario btn-sm" onClick={exportarPDF} disabled={exportando || !filtrados.length}>
+            {exportando ? <span className="girador" style={{ width: 12, height: 12 }} /> : <FiDownload size={13} />} Informe PDF
+          </button>
+        </div>
       </div>
 
-      {/* ÁREA EXPORTABLE AL PDF */}
-      <div ref={printRef} style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px', backgroundColor: '#F4F7FE', flex: 1 }}>
-        
-        {/* Cabecera Membrete */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '3px solid #1e293b', paddingBottom: '16px' }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: '22px', fontWeight: 900, color: '#0f172a', letterSpacing: '1px' }}>INFORME TÁCTICO DE INCIVILIDADES</h2>
-            <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#475569', fontWeight: 700 }}>MUNICIPALIDAD DE BUIN • DEPARTAMENTO DE OPERACIONES C4</p>
+      <div className="desplazable" style={{ flex: 1 }}>
+        <div ref={informe} style={{ display: "flex", flexDirection: "column", gap: 12, background: "var(--fondo)", paddingBottom: 12 }}>
+          {/* Membrete */}
+          <div className="panel marco fila entre anim-arriba" style={{ padding: "14px 18px", borderTop: "3px solid var(--marino)" }}>
+            <div>
+              <div className="rotulo">Municipalidad de Buin | Central de Operaciones C4</div>
+              <h2 className="titulo-1" style={{ marginTop: 4 }}>Informe de gestión de reportes ciudadanos</h2>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div className="rotulo">Periodo</div>
+              <div className="mono" style={{ fontSize: 15, fontWeight: 600, marginTop: 2 }}>{p.etiqueta}{depto !== "TODOS" ? ` | ${DEPARTAMENTOS.find(x => x.id === depto)?.corto}` : ""}</div>
+              <div className="texto-3" style={{ fontSize: 11 }}>Generado {fechaHora(new Date(ahora))}</div>
+            </div>
           </div>
-          <div style={{ textAlign: 'right' }}>
-            <span style={{ display: 'block', fontSize: '10px', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase' }}>Periodo de Datos</span>
-            <span style={{ fontSize: '16px', fontWeight: 900, color: '#0284c7' }}>{filtroTiempo.replace(/_/g, ' ')}</span>
-          </div>
+
+          {!filtrados.length ? (
+            <Vacio icono={<FiInbox size={22} />} titulo="Sin reportes en este periodo" texto="Prueba con un periodo más amplio o con otro departamento." />
+          ) : (
+            <>
+              {/* KPIs */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
+                <Kpi i={0} titulo="Reportes ingresados" valor={d.total} detalle={`${d.activos} activos | ${d.descartados} descartados`} icono={<FiInbox size={14} />} />
+                <Kpi i={1} titulo="Resueltos" valor={d.total ? (d.resueltos / d.total) * 100 : 0} sufijo="%" detalle={`${d.resueltos} casos cerrados`} color="var(--ok)" icono={<FiCheckSquare size={14} />} />
+                <Kpi i={2} titulo="Tiempo de cierre" valor={fmtHoras(d.tiempoCierre)} decimales={1} sufijo="h" detalle="Promedio desde el ingreso" color="#7048E8" icono={<FiClock size={14} />} />
+                <Kpi i={3} titulo="Primera gestión" valor={fmtHoras(d.respuesta)} decimales={1} sufijo="h" detalle="Hasta la derivación o asignación" color="var(--acento)" icono={<FiTrendingUp size={14} />} />
+                <Kpi i={4} titulo="Cierre en plazo" valor={d.cumplimiento} sufijo="%" detalle="Según prioridad (4 h a 7 días)" color={d.cumplimiento >= 80 ? "var(--ok)" : "var(--alerta)"} icono={<FiCheckSquare size={14} />} />
+                <Kpi i={5} titulo="Fuera de plazo" valor={d.atrasados} detalle={`${d.criticos} críticos activos`} color="var(--peligro)" icono={<FiAlertTriangle size={14} />} />
+                <Kpi i={6} titulo="Satisfacción" valor={d.satisfaccion} sufijo="%" detalle={d.notas ? `${d.notas} evaluaciones de vecinos` : "Sin evaluaciones aún"} color="#C08A00" icono={<FiStar size={14} />} />
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1fr)", gap: 12 }}>
+                <Grafico titulo={p.dias === 0 ? "Ingresos y cierres por hora" : "Ingresos y cierres por día"} i={0}>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <ComposedChart data={d.tendencia} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="2 4" vertical={false} stroke="#D8DEE6" />
+                      <XAxis dataKey="etiqueta" tick={EJE} axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={16} />
+                      <YAxis tick={EJE} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <Tooltip {...TOOLTIP} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} iconType="square" />
+                      <Bar dataKey="Ingresos" fill="#1D4ED8" maxBarSize={22} {...ANIM} />
+                      <Line dataKey="Cierres" type="linear" stroke="#2B8A3E" strokeWidth={2.5} dot={{ r: 0 }} {...ANIM} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </Grafico>
+                <Grafico titulo="Embudo por estado" i={1}>
+                  <BarrasHorizontales datos={d.porEstado} alto={260} ancho={86} />
+                </Grafico>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
+                <Grafico titulo="Carga y rendimiento por departamento" i={2}>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <ComposedChart data={d.porDepto} margin={{ top: 8, right: 0, left: -18, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="2 4" vertical={false} stroke="#D8DEE6" />
+                      <XAxis dataKey="nombre" tick={EJE} axisLine={false} tickLine={false} />
+                      <YAxis yAxisId="n" tick={EJE} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <YAxis yAxisId="h" orientation="right" tick={EJE} axisLine={false} tickLine={false} width={34} />
+                      <Tooltip {...TOOLTIP} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} iconType="square" />
+                      <Bar yAxisId="n" dataKey="Resueltos" stackId="a" fill="#2B8A3E" maxBarSize={36} {...ANIM} />
+                      <Bar yAxisId="n" dataKey="Activos" stackId="a" fill="#AEB8C5" maxBarSize={36} {...ANIM} />
+                      <Bar yAxisId="n" dataKey="Atrasados" fill="#C92A2A" maxBarSize={12} {...ANIM} />
+                      <Line yAxisId="h" dataKey="Horas promedio" type="linear" stroke="#7048E8" strokeWidth={2} {...ANIM} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </Grafico>
+                <Grafico titulo="Categorías más reportadas" i={3}>
+                  <BarrasHorizontales datos={d.porCategoria} alto={250} ancho={128} />
+                </Grafico>
+                <Grafico titulo="Prioridad asignada" i={4}>
+                  <BarrasHorizontales datos={d.porPrioridad} alto={250} ancho={60} />
+                </Grafico>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
+                <Grafico titulo="Concentración horaria" i={5}>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={d.horasDia} margin={{ top: 8, right: 0, left: -24, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="2 4" vertical={false} stroke="#D8DEE6" />
+                      <XAxis dataKey="hora" tick={EJE} axisLine={false} tickLine={false} interval={2} />
+                      <YAxis tick={EJE} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <Tooltip {...TOOLTIP} formatter={(v: any) => [v, "Reportes"]} labelFormatter={l => `${l}:00`} />
+                      <Bar dataKey="valor" {...ANIM}>
+                        {d.horasDia.map((h, i) => {
+                          const max = Math.max(...d.horasDia.map(x => x.valor), 1);
+                          return <Cell key={i} fill={h.valor / max > 0.7 ? "#C92A2A" : h.valor / max > 0.4 ? "#E8590C" : "#1D4ED8"} />;
+                        })}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </Grafico>
+                <Grafico titulo="Día de la semana" i={6}>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={d.diasSemana} margin={{ top: 8, right: 0, left: -24, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="2 4" vertical={false} stroke="#D8DEE6" />
+                      <XAxis dataKey="dia" tick={EJE} axisLine={false} tickLine={false} />
+                      <YAxis tick={EJE} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <Tooltip {...TOOLTIP} formatter={(v: any) => [v, "Reportes"]} />
+                      <Bar dataKey="valor" fill="#0A1222" maxBarSize={30} {...ANIM} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </Grafico>
+                <Grafico titulo="Evaluación de los vecinos" i={7}>
+                  {d.notas ? <BarrasHorizontales datos={d.satisf} alto={220} ancho={90} /> : <Vacio titulo="Sin evaluaciones" texto="Al resolver un caso, el vecino recibe una encuesta por WhatsApp." />}
+                </Grafico>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
+                <Grafico titulo="Unidades vecinales con más reportes" i={8}>
+                  {d.porUV.length ? <BarrasHorizontales datos={d.porUV.map(x => ({ ...x, color: "#1D4ED8" }))} alto={Math.max(180, d.porUV.length * 28)} ancho={170} /> : <Vacio titulo="Sin ubicaciones" />}
+                </Grafico>
+                <Grafico titulo="Funcionarios con más casos resueltos" i={9}>
+                  {d.funcionarios.length ? (
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ textAlign: "left" }}>
+                          {["#", "Funcionario", "Resueltos", "Tiempo medio", "Satisfacción"].map(h => <th key={h} className="rotulo" style={{ padding: "6px 8px", borderBottom: "1px solid var(--borde)" }}>{h}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {d.funcionarios.map((f, i) => (
+                          <tr key={f.nombre} className="anim-arriba" style={{ ["--i" as any]: i }}>
+                            <td className="mono" style={{ padding: "8px", borderBottom: "1px solid var(--borde)", color: "var(--texto-3)" }}>{String(i + 1).padStart(2, "0")}</td>
+                            <td style={{ padding: "8px", borderBottom: "1px solid var(--borde)", fontWeight: 600 }}>{f.nombre}</td>
+                            <td className="mono" style={{ padding: "8px", borderBottom: "1px solid var(--borde)" }}>
+                              <div className="fila"><span style={{ width: 60 }} className="barra"><span style={{ width: `${(f.resueltos / d.funcionarios[0].resueltos) * 100}%` }} /></span>{f.resueltos}</div>
+                            </td>
+                            <td className="mono" style={{ padding: "8px", borderBottom: "1px solid var(--borde)" }}>{horas(f.ms / f.resueltos).toFixed(1)} h</td>
+                            <td className="mono" style={{ padding: "8px", borderBottom: "1px solid var(--borde)" }}>{f.notas.length ? `${Math.round((f.notas.filter(n => n >= 5).length / f.notas.length) * 100)}%` : "--"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : <Vacio titulo="Sin casos resueltos en el periodo" />}
+                </Grafico>
+              </div>
+            </>
+          )}
         </div>
-
-        {/* 1. SECCIÓN KPIs EJECUTIVOS */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '16px' }}>
-          <KpiCard titulo="TOTAL INGRESOS" valor={stats.total} icono={<FiActivity size={20} />} color="#0284c7" bg="#f0f9ff" />
-          <KpiCard titulo="TASA DE CIERRE" valor={`${stats.resolucionPorcentaje}%`} icono={<FiTrendingUp size={20} />} color="#059669" bg="#ecfdf5" />
-          <KpiCard titulo="SLA PROMEDIO" valor="45 MIN" icono={<FiZap size={20} />} color="#8b5cf6" bg="#f5f3ff" />
-          <KpiCard titulo="PENDIENTES (COLA)" valor={stats.pendientes} icono={<FiClock size={20} />} color="#d97706" bg="#fffbeb" />
-          <KpiCard titulo="ALERTA CRÍTICA" valor={stats.criticos} icono={<FiAlertTriangle size={20} />} color="#e11d48" bg="#fff1f2" />
-          <KpiCard titulo="MÁS DEMANDADO" valor={stats.topDepto} icono={<FiShield size={20} />} color="#0f172a" bg="#f1f5f9" textSize="12px" />
-        </div>
-
-        {/* 2. BLOQUE PRINCIPAL DE RENDIMIENTO Y FLUJO */}
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px' }}>
-          
-          <ChartCard titulo="TENDENCIA OPERATIVA (INGRESOS VS CIERRES)" icono={<FiTrendingUp color="#0284c7" />}>
-            <ResponsiveContainer width="100%" height={280}>
-              <AreaChart data={graficos.tendencia} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorIngresos" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0284c7" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#0284c7" stopOpacity={0}/>
-                  </linearGradient>
-                  <linearGradient id="colorResueltos" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="fecha" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }} />
-                <Legend wrapperStyle={{ fontSize: '11px', fontWeight: 700 }} />
-                <Area isAnimationActive={false} type="monotone" dataKey="Ingresos" stroke="#0284c7" strokeWidth={3} fillOpacity={1} fill="url(#colorIngresos)" />
-                <Area isAnimationActive={false} type="monotone" dataKey="Resueltos" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorResueltos)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </ChartCard>
-
-          <ChartCard titulo="EMBUDO DE ESTADOS C4" icono={<FiLayers color="#d97706" />}>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={graficos.estados} layout="vertical" margin={{ top: 0, right: 30, left: 10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
-                <XAxis type="number" hide />
-                <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: '#475569', fontWeight: 600 }} width={90} axisLine={false} tickLine={false} />
-                <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }} />
-                <Bar isAnimationActive={false} dataKey="value" radius={[0, 6, 6, 0]} barSize={24}>
-                  {graficos.estados.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-
-        </div>
-
-        {/* 3. BLOQUE DEPARTAMENTOS Y RIESGO */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr', gap: '24px' }}>
-          
-          <ChartCard titulo="CARGA DEPARTAMENTAL" icono={<FiPieChart color="#8b5cf6" />}>
-            <ResponsiveContainer width="100%" height={250}>
-              <PieChart>
-                <Pie isAnimationActive={false} data={graficos.deptos} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={5} dataKey="value">
-                  {graficos.deptos.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORES_BASE[index % COLORES_BASE.length]} />)}
-                </Pie>
-                <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }} />
-                <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 700 }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </ChartCard>
-
-          <ChartCard titulo="EFICIENCIA DE RESOLUCIÓN POR DEPARTAMENTO" icono={<FiShield color="#0f172a" />}>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={graficos.rendimientoDeptos} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="depto" tick={{ fontSize: 10, fill: '#475569', fontWeight: 600 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }} />
-                <Legend wrapperStyle={{ fontSize: '11px', fontWeight: 700 }} />
-                <Bar isAnimationActive={false} dataKey="Resueltos" stackId="a" fill="#10b981" radius={[0, 0, 4, 4]} barSize={35} />
-                <Bar isAnimationActive={false} dataKey="Activos" stackId="a" fill="#cbd5e1" radius={[4, 4, 0, 0]} barSize={35} />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-
-          <ChartCard titulo="MATRIZ DE RIESGO (IA)" icono={<FiAlertTriangle color="#ef4444" />}>
-            <ResponsiveContainer width="100%" height={250}>
-              <PieChart>
-                <Pie isAnimationActive={false} data={graficos.prioridades} cx="50%" cy="50%" outerRadius={90} dataKey="value" stroke="none">
-                  {graficos.prioridades.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
-                </Pie>
-                <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }} />
-                <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 700 }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </ChartCard>
-
-        </div>
-
-        {/* 4. BLOQUE CATEGORÍAS Y COMPORTAMIENTO HORARIO */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr', gap: '24px' }}>
-          
-          <ChartCard titulo="TOP 7 INCIVILIDADES Y EMERGENCIAS MÁS REPORTADAS" icono={<FiTarget color="#f59e0b" />}>
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={graficos.categorias} layout="vertical" margin={{ top: 0, right: 30, left: 10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
-                <XAxis type="number" hide />
-                <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: '#475569', fontWeight: 600 }} width={120} axisLine={false} tickLine={false} />
-                <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }} />
-                <Bar isAnimationActive={false} dataKey="value" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={20}>
-                  {graficos.categorias.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORES_BASE[index % COLORES_BASE.length]} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-
-          <ChartCard titulo="CONCENTRACIÓN HORARIA" icono={<FiClock color="#14b8a6" />}>
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={graficos.horas} margin={{ top: 10, right: 5, left: -25, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="hora" tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }} />
-                <Bar isAnimationActive={false} dataKey="cantidad" fill="#f43f5e" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-
-          <ChartCard titulo="MAPA DE CALOR SEMANAL" icono={<FiCalendar color="#6366f1" />}>
-            <ResponsiveContainer width="100%" height={260}>
-              <RadarChart cx="50%" cy="50%" outerRadius="70%" data={graficos.diasSemana}>
-                <PolarGrid stroke="#e2e8f0" />
-                <PolarAngleAxis dataKey="subject" tick={{ fontSize: 10, fill: '#475569', fontWeight: 600 }} />
-                <PolarRadiusAxis angle={30} domain={[0, 'auto']} tick={{ fontSize: 8 }} />
-                <Radar isAnimationActive={false} name="Emergencias" dataKey="A" stroke="#6366f1" strokeWidth={2} fill="#818cf8" fillOpacity={0.5} />
-                <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }} />
-              </RadarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-
-        </div>
-
       </div>
     </div>
   );
 }
 
-// ---------------- Componentes Auxiliares UI ---------------- //
-
-function KpiCard({ titulo, valor, icono, color, bg, textSize = "22px" }: any) {
+function Grafico({ titulo, children, i = 0 }: { titulo: string; children: React.ReactNode; i?: number }) {
   return (
-    <div style={{ backgroundColor: 'white', padding: '14px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '12px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-      <div style={{ width: '42px', height: '42px', borderRadius: '12px', backgroundColor: bg, color: color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        {icono}
+    <div className="panel anim-arriba" style={{ ["--i" as any]: i, minWidth: 0 }}>
+      <div className="panel-cabecera" style={{ padding: "10px 14px" }}>
+        <span className="titulo-3">{titulo}</span>
       </div>
-      <div style={{ overflow: 'hidden' }}>
-        <h4 style={{ fontSize: '8px', fontWeight: 900, color: '#94a3b8', margin: '0 0 2px 0', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{titulo}</h4>
-        <span style={{ fontSize: textSize, fontWeight: 900, color: '#1e293b', lineHeight: 1.1, display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {valor}
-        </span>
-      </div>
+      <div style={{ padding: "12px 14px" }}>{children}</div>
     </div>
   );
 }
 
-function ChartCard({ titulo, icono, children }: any) {
+function BarrasHorizontales({ datos, alto, ancho }: { datos: { nombre: string; valor: number; color: string }[]; alto: number; ancho: number }) {
   return (
-    <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '20px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)', display: 'flex', flexDirection: 'column' }}>
-      <h3 style={{ fontSize: '11px', fontWeight: 900, color: '#1e293b', marginTop: 0, marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px', letterSpacing: '0.5px' }}>
-        {icono} {titulo}
-      </h3>
-      <div style={{ flex: 1, width: '100%' }}>
-        {children}
-      </div>
-    </div>
+    <ResponsiveContainer width="100%" height={alto}>
+      <BarChart data={datos} layout="vertical" margin={{ top: 0, right: 28, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="2 4" horizontal={false} stroke="#D8DEE6" />
+        <XAxis type="number" hide allowDecimals={false} />
+        <YAxis dataKey="nombre" type="category" width={ancho} tick={{ ...EJE, fontFamily: "var(--fuente)", fill: "#46536A" }} axisLine={false} tickLine={false} />
+        <Tooltip {...TOOLTIP} formatter={(v: any) => [v, "Reportes"]} />
+        <Bar dataKey="valor" maxBarSize={22} label={{ position: "right", fontSize: 11, fill: "#46536A", fontFamily: "var(--mono)" }} {...ANIM}>
+          {datos.map((x, i) => <Cell key={i} fill={x.color} />)}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
   );
 }

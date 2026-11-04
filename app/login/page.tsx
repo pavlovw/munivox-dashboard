@@ -1,119 +1,128 @@
 "use client";
 
-import { useState } from 'react';
-import { signIn } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
-import { FiShield, FiLock, FiMail, FiAlertCircle } from 'react-icons/fi';
+import { useEffect, useState } from "react";
+import { signIn, useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
+import { FiLock, FiMail, FiAlertTriangle, FiEye, FiEyeOff, FiArrowRight, FiMessageSquare, FiCpu, FiMap } from "react-icons/fi";
+import { Logo } from "../../components/ui/Comunes";
+
+const ERRORES: Record<string, string> = {
+  CredentialsSignin: "Correo o contraseña incorrectos.",
+  NUEVA_CLAVE: "Tu cuenta tiene una contraseña temporal. Pide a la Dirección de Informática que la active.",
+  CONFIGURACION: "El sistema no tiene configurado el acceso a Cognito. Avisa a soporte.",
+  CONEXION: "No hay conexión con el servicio de autenticación. Intenta en unos minutos.",
+};
+
+const ETAPAS = [
+  { icono: <FiMessageSquare size={16} />, titulo: "El vecino reporta por WhatsApp", texto: "Texto, fotografía y ubicación exacta." },
+  { icono: <FiCpu size={16} />, titulo: "La IA clasifica y prioriza", texto: "Categoría, área responsable y nivel de riesgo." },
+  { icono: <FiMap size={16} />, titulo: "La municipalidad despacha y resuelve", texto: "C4, jefaturas y terreno conectados en tiempo real." },
+];
 
 export default function Login() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const { status } = useSession();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [verClave, setVerClave] = useState(false);
+  const [error, setError] = useState("");
+  const [intento, setIntento] = useState(0);
   const [cargando, setCargando] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  useEffect(() => {
+    if (status === "authenticated") router.replace("/");
+  }, [status, router]);
+
+  const enviar = async (e: React.FormEvent) => {
     e.preventDefault();
     setCargando(true);
-    setError('');
-
-    const res = await signIn('credentials', {
-      redirect: false,
-      email,
-      password,
-    });
-
+    setError("");
+    const res = await signIn("credentials", { redirect: false, email: email.trim(), password });
     if (res?.error) {
-      setError('Credenciales inválidas. Acceso denegado por seguridad.');
+      setError(ERRORES[res.error] || ERRORES.CredentialsSignin);
+      setIntento(i => i + 1);
       setCargando(false);
     } else {
-      router.push('/'); // Redirige al Dashboard general para que el sistema decida a dónde enviarlo
+      router.replace("/");
     }
   };
 
   return (
-    <div style={{ display: 'flex', height: '100vh', backgroundColor: '#F4F7FE', fontFamily: 'system-ui, sans-serif' }}>
-      
-      {/* PANEL IZQUIERDO - INFORMACIÓN MUNICIPAL */}
-      <div style={{ flex: 1, background: 'linear-gradient(135deg, #1D4ED8 0%, #2563EB 100%)', color: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '60px', position: 'relative', overflow: 'hidden' }}>
-        <div style={{ position: 'absolute', width: '800px', height: '800px', borderRadius: '50%', background: 'rgba(255,255,255,0.03)', top: '-200px', left: '-200px' }}></div>
-        <div style={{ position: 'relative', zIndex: 10, maxWidth: '500px' }}>
-          <div style={{ padding: '16px', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: '20px', backdropFilter: 'blur(10px)', width: 'fit-content', marginBottom: '24px' }}>
-            <FiShield size={40} color="white" />
-          </div>
-          <h1 style={{ fontSize: '48px', fontWeight: 900, margin: '0 0 16px 0', letterSpacing: '-1px' }}>MuniVox C4</h1>
-          <h2 style={{ fontSize: '24px', fontWeight: 300, color: '#bae6fd', margin: '0 0 32px 0' }}>Sistema de Gestión Territorial Activa</h2>
-          <p style={{ fontSize: '16px', lineHeight: 1.6, color: '#e0f2fe', margin: '0 0 24px 0' }}>
-            Acceso restringido para operadores y analistas de la Ilustre Municipalidad de Buin. Toda interacción en esta plataforma se encuentra bajo auditoría y trazabilidad estricta.
+    <div style={{ display: "flex", minHeight: "100vh" }}>
+      {/* PANEL INSTITUCIONAL */}
+      <div className="fondo-rejilla oculto-movil" style={{ flex: 1, position: "relative", overflow: "hidden", color: "#fff", display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "40px 56px" }}>
+        <span style={{ position: "absolute", left: 0, right: 0, height: 120, background: "linear-gradient(180deg, transparent, rgba(76,125,255,0.10), transparent)", animation: "escaneo 7s linear infinite", pointerEvents: "none" }} />
+        <div className="anim-arriba"><Logo tamano={36} subtitulo="Municipalidad de Buin" /></div>
+
+        <div style={{ maxWidth: 520, position: "relative" }}>
+          <div className="rotulo anim-arriba" style={{ color: "#4C7DFF", ["--i" as any]: 1 }}>Central de operaciones C4</div>
+          <h1 className="anim-arriba" style={{ fontSize: 44, lineHeight: 1.08, fontWeight: 700, letterSpacing: "-0.03em", margin: "12px 0 18px", ["--i" as any]: 2 }}>
+            Cada reporte de un vecino,<br />atendido y trazable.
+          </h1>
+          <p className="anim-arriba" style={{ color: "var(--marino-texto)", fontSize: 15, lineHeight: 1.6, margin: 0, ["--i" as any]: 3 }}>
+            Plataforma de gestión de incidencias urbanas: baches, microbasurales, luminarias, vehículos abandonados, ruidos, señalética, áreas verdes y animales.
           </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 'bold', backgroundColor: 'rgba(0,0,0,0.2)', padding: '12px 20px', borderRadius: '12px', width: 'fit-content' }}>
-            <span style={{ width: '8px', height: '8px', backgroundColor: '#4ade80', borderRadius: '50%' }}></span>
-            CONEXIÓN SEGURA CIFRADA (E2EE)
+
+          <div style={{ marginTop: 36, borderLeft: "1px solid var(--marino-borde)" }}>
+            {ETAPAS.map((e, i) => (
+              <div key={e.titulo} className="anim-izquierda fila" style={{ gap: 14, padding: "12px 0 12px 18px", position: "relative", animationDelay: `${300 + i * 140}ms`, alignItems: "flex-start" }}>
+                <span style={{ position: "absolute", left: -5, top: 20, width: 9, height: 9, background: "#4C7DFF" }} />
+                <span style={{ width: 34, height: 34, border: "1px solid var(--marino-borde)", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#4C7DFF", flexShrink: 0, background: "var(--marino-2)" }}>{e.icono}</span>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{e.titulo}</div>
+                  <div style={{ color: "var(--marino-texto)", fontSize: 12.5, marginTop: 2 }}>{e.texto}</div>
+                </div>
+              </div>
+            ))}
           </div>
+        </div>
+
+        <div className="fila anim-aparecer" style={{ gap: 10, color: "var(--marino-texto)", fontSize: 11.5, animationDelay: "700ms" }}>
+          <span className="vivo" /> Acceso exclusivo para personal municipal. Toda acción queda registrada.
         </div>
       </div>
 
-      {/* PANEL DERECHO - FORMULARIO LOGIN */}
-      <div style={{ width: '500px', backgroundColor: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '48px', boxShadow: '-10px 0 30px rgba(0,0,0,0.05)', zIndex: 20 }}>
-        
-        <div style={{ marginBottom: '40px' }}>
-          <h2 style={{ fontSize: '24px', fontWeight: 900, color: '#1e293b', margin: '0 0 8px 0' }}>Iniciar Sesión</h2>
-          <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>Ingresa tus credenciales operativas.</p>
+      {/* FORMULARIO */}
+      <div style={{ width: "min(100%, 480px)", background: "var(--superficie)", display: "flex", flexDirection: "column", justifyContent: "center", padding: "48px 44px", borderLeft: "1px solid var(--borde)", margin: "0 auto" }}>
+        <div className="anim-arriba" style={{ marginBottom: 32 }}>
+          <div className="rotulo">Iniciar sesión</div>
+          <h2 className="titulo-1" style={{ marginTop: 6 }}>Ingresa con tu cuenta institucional</h2>
+          <p className="texto-3" style={{ margin: "8px 0 0", fontSize: 13 }}>El sistema te llevará a tu panel según tu rol: central C4, jefatura o terreno.</p>
         </div>
 
         {error && (
-          <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#ef4444', padding: '14px', borderRadius: '12px', fontSize: '13px', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '24px' }}>
-            <FiAlertCircle size={18} /> {error}
+          <div key={intento} className="anim-sacudir fila" role="alert" style={{ gap: 10, alignItems: "flex-start", background: "var(--peligro-suave)", borderLeft: "3px solid var(--peligro)", color: "#8F1D1D", padding: "10px 12px", fontSize: 12.5, marginBottom: 18 }}>
+            <FiAlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} /> {error}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          
-          <div>
-            <label style={{ display: 'block', fontSize: '11px', fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>Correo Institucional</label>
-            <div style={{ position: 'relative' }}>
-              <FiMail style={{ position: 'absolute', left: '16px', top: '16px', color: '#94a3b8' }} size={18} />
-              <input 
-                type="email" 
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="operador@munivox.cl" 
-                style={{ width: '100%', padding: '14px 14px 14px 44px', backgroundColor: '#F8FAFC', border: '1px solid #e2e8f0', borderRadius: '14px', fontSize: '14px', outline: 'none', color: '#1e293b', boxSizing: 'border-box' }}
-              />
+        <form onSubmit={enviar} className="columna" style={{ gap: 16 }}>
+          <label className="campo anim-arriba" style={{ ["--i" as any]: 1 }}>
+            <span className="rotulo">Correo institucional</span>
+            <div className="input-con-icono">
+              <FiMail size={15} />
+              <input className="input" style={{ height: 44 }} type="email" autoComplete="username" required value={email} onChange={e => setEmail(e.target.value)} placeholder="nombre@municipalidad.cl" />
             </div>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: '11px', fontWeight: 900, color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>Contraseña Operativa</label>
-            <div style={{ position: 'relative' }}>
-              <FiLock style={{ position: 'absolute', left: '16px', top: '16px', color: '#94a3b8' }} size={18} />
-              <input 
-                type="password" 
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••" 
-                style={{ width: '100%', padding: '14px 14px 14px 44px', backgroundColor: '#F8FAFC', border: '1px solid #e2e8f0', borderRadius: '14px', fontSize: '14px', outline: 'none', color: '#1e293b', boxSizing: 'border-box' }}
-              />
+          </label>
+          <label className="campo anim-arriba" style={{ ["--i" as any]: 2 }}>
+            <span className="rotulo">Contraseña</span>
+            <div className="input-con-icono" style={{ position: "relative" }}>
+              <FiLock size={15} />
+              <input className="input" style={{ height: 44, paddingRight: 44 }} type={verClave ? "text" : "password"} autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} />
+              <button type="button" onClick={() => setVerClave(!verClave)} aria-label={verClave ? "Ocultar contraseña" : "Mostrar contraseña"}
+                style={{ position: "absolute", right: 1, top: 1, bottom: 1, width: 42, border: 0, borderLeft: "1px solid var(--borde)", background: "var(--superficie-2)", color: "var(--texto-2)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                {verClave ? <FiEyeOff size={15} /> : <FiEye size={15} />}
+              </button>
             </div>
-          </div>
-
-          <button 
-            type="submit" 
-            disabled={cargando}
-            style={{ marginTop: '12px', width: '100%', padding: '16px', backgroundColor: '#2563EB', color: 'white', border: 'none', borderRadius: '14px', fontSize: '14px', fontWeight: 'bold', cursor: cargando ? 'not-allowed' : 'pointer', opacity: cargando ? 0.7 : 1, transition: 'background-color 0.2s', boxShadow: '0 4px 6px rgba(37,99,235,0.2)' }}
-          >
-            {cargando ? 'AUTENTICANDO...' : 'INGRESAR AL SISTEMA C4'}
+          </label>
+          <button type="submit" disabled={cargando} className="btn btn-primario btn-lg btn-bloque anim-arriba" style={{ marginTop: 8, ["--i" as any]: 3 }}>
+            {cargando ? <><span className="girador" style={{ width: 14, height: 14, borderColor: "rgba(255,255,255,.35)", borderTopColor: "#fff" }} /> Verificando credenciales</> : <>Ingresar <FiArrowRight size={16} /></>}
           </button>
         </form>
 
-        <div style={{ marginTop: '48px', paddingTop: '24px', borderTop: '1px solid #f1f5f9', textAlign: 'center' }}>
-          <p style={{ fontSize: '11px', color: '#94a3b8', margin: 0 }}>
-            Para recuperar credenciales o solicitar nuevos accesos, comuníquese con la Dirección de Informática (DTI).
-          </p>
+        <div className="texto-3 anim-aparecer" style={{ marginTop: 40, paddingTop: 18, borderTop: "1px solid var(--borde)", fontSize: 11.5, lineHeight: 1.6, animationDelay: "400ms" }}>
+          Para crear una cuenta o recuperar el acceso, comunícate con la Dirección de Informática de la Municipalidad de Buin.
         </div>
-
       </div>
     </div>
   );

@@ -1,464 +1,483 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from 'react';
-import dynamic from 'next/dynamic';
-import { useSession, signOut } from 'next-auth/react';
-import { 
-  FiMap, FiTarget, FiUserCheck, FiArrowLeft, FiLogOut, 
-  FiAlertCircle, FiClock, FiMapPin, FiTruck, FiCheckCircle, FiBell, FiX 
-} from 'react-icons/fi';
-import { useApi } from '../../lib/useApi';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { signOut } from "next-auth/react";
+import { FiBell, FiLogOut, FiSearch, FiUserCheck, FiCheck, FiNavigation, FiEdit3, FiSlash, FiInbox, FiUsers, FiX, FiAlertTriangle, FiStar } from "react-icons/fi";
 
-const MapComponent = dynamic(() => import('@/components/Map'), { 
+import DetalleTicket from "../../components/DetalleTicket";
+import { Logo, PantallaCarga, IndicadorConexion, InsigniaEstado, IndicadorSla, Esqueleto, Vacio, Modal, Kpi } from "../../components/ui/Comunes";
+import { Icono } from "../../components/ui/Iconos";
+import { useAvisos } from "../../components/ui/Avisos";
+import { useApi, mensajeError } from "../../lib/useApi";
+import { usePerfil } from "../../lib/usePerfil";
+import { useTiempoReal, useRefresco, useAgrupado } from "../../lib/useTiempoReal";
+import { useAhora, usePreferencia, sonarAlerta } from "../../lib/hooks";
+import { distanciaKm } from "../../lib/geo";
+import type { Ticket, Operador } from "../../lib/tipos";
+import {
+  DEPARTAMENTOS, PRIORIDADES, ESTADOS_ACTIVOS, categoriaInfo, departamentoInfo, prioridadDe, slaDe, tiempoRelativo,
+  normalizar, resumenDescripcion, esRechazo, esCalificacion, horaCorta,
+} from "../../lib/constantes";
+
+const Mapa = dynamic(() => import("../../components/Map"), {
   ssr: false,
-  loading: () => (
-    <div style={{ display: 'flex', height: '100%', width: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc', color: '#0284c7', fontSize: '12px', fontWeight: 'bold' }}>
-      CARGANDO CARTOGRAFÍA...
-    </div>
-  )
+  loading: () => <div className="esqueleto" style={{ width: "100%", height: "100%" }} />,
 });
 
-const API_URL = process.env.NEXT_PUBLIC_API_GATEWAY_URL || 'https://nn4p1ybmu2.execute-api.us-east-2.amazonaws.com';
+type Pestana = "POR_ASIGNAR" | "POR_CONFIRMAR" | "EN_TERRENO" | "CERRADOS";
 
-interface HistorialItem {
-  id: string;
-  comentario: string;
-  createdAt: string;
-  estadoNuevo: string;
-}
+const MOTIVOS_DESCARTE = ["Duplicado de otro reporte", "Ya estaba solucionado al llegar", "No corresponde a este departamento", "Información insuficiente para atender"];
 
-interface Ticket {
-  id: string;
-  codigoTicket: string;
-  estado: string;
-  latitud: number | null;
-  longitud: number | null;
-  descripcionUsuario: string;
-  createdAt: string;
-  categoria?: { nombre: string };
-  prioridadIA: string;
-  operadorAsignadoId?: string | null;
-  historial?: HistorialItem[];
-}
-
-interface Funcionario {
-  id: string;
-  nombre: string;
-  latitud: number | null;
-  longitud: number | null;
-  gpsActivo: boolean;
-  ultimaUbicacion: string;
-}
-
-export default function DepartamentoDashboard() {
-  const { data: session } = useSession();
+export default function ConsolaDepartamento() {
+  const { perfil, error: errorPerfil } = usePerfil(["OPERADOR", "ADMINISTRADOR"]);
   const api = useApi();
-  
+  const avisar = useAvisos();
+  const ahora = useAhora(30000);
+
+  const [deptoAdmin, setDeptoAdmin] = useState(1);
+  const deptoId = perfil?.rol === "ADMINISTRADOR" ? deptoAdmin : perfil?.departamentoId ?? null;
+  const depto = departamentoInfo(deptoId ?? undefined);
+
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [funcionarios, setFuncionarios] = useState<Funcionario[]>([]);
-  const [cargando, setCargando] = useState<boolean>(true);
-  
-  const [ticketSeleccionado, setTicketSeleccionado] = useState<Ticket | null>(null);
-  const [modoDespacho, setModoDespacho] = useState<boolean>(false);
-  const [procesandoAsignacion, setProcesandoAsignacion] = useState<boolean>(false);
-  
-  // Estado para el panel de notificaciones
-  const [mostrarNotificaciones, setMostrarNotificaciones] = useState<boolean>(false);
+  const [funcionarios, setFuncionarios] = useState<Operador[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [pestana, setPestana] = useState<Pestana>("POR_ASIGNAR");
+  const [texto, setTexto] = useState("");
+  const [seleccionadoId, setSeleccionadoId] = useState<string | null>(null);
+  const [detalle, setDetalle] = useState<Ticket | null>(null);
+  const [cargandoDetalle, setCargandoDetalle] = useState(false);
+  const [procesando, setProcesando] = useState<string | null>(null);
+  const [resaltado, setResaltado] = useState<string | null>(null);
+  const [mostrarPersonal, setMostrarPersonal] = useState(true);
+  const [panelAlertas, setPanelAlertas] = useState(false);
+  const [alertasVistas, setAlertasVistas] = usePreferencia<string[]>("munivox_alertas_vistas", []);
+  const [modal, setModal] = useState<null | "DESCARTAR" | "NOTA">(null);
+  const [textoModal, setTextoModal] = useState("");
+  const seleccionRef = useRef<string | null>(null);
+  const conocidos = useRef<Set<string> | null>(null);
 
-  const infoDepartamento = useMemo(() => {
-    const email = session?.user?.email || '';
-    const prefix = email.split('@')[0].toLowerCase();
-    
-    switch(prefix) {
-      case 'aseo': return { id: 1, nombre: 'Aseo y Ornato', color: '#10b981' };
-      case 'transito': return { id: 2, nombre: 'Dirección de Tránsito', color: '#f59e0b' };
-      case 'seguridad': return { id: 3, nombre: 'Seguridad Pública', color: '#3b82f6' };
-      case 'obras': return { id: 4, nombre: 'Obras Municipales', color: '#8b5cf6' };
-      default: return { id: 0, nombre: 'Departamento', color: '#64748b' };
-    }
-  }, [session]);
-
-    // 1. Modificar cargarDatos para aceptar un modo silencioso
-  const cargarDatos = async (silencioso = false) => {
-    if (infoDepartamento.id === 0) return;
-    
-    // Solo muestra la pantalla de carga la primera vez
-    if (!silencioso) setCargando(true); 
-    
+  // --------------------------------------------------------------------------
+  // DATOS
+  // --------------------------------------------------------------------------
+  const cargar = useCallback(async () => {
+    if (!deptoId) return;
     try {
-      const resTickets = await api(`${API_URL}/tickets?departamentoId=${infoDepartamento.id}`);
-      if (resTickets.ok) {
-        const dataTickets = await resTickets.json();
-        setTickets(dataTickets.filter((t: Ticket) => t.estado !== 'RESUELTO' && t.estado !== 'DESCARTADO'));
+      const [rt, rf] = await Promise.all([
+        api(`/tickets?departamentoId=${deptoId}`),
+        api(`/operadores?departamentoId=${deptoId}&rol=TERRENO`),
+      ]);
+      if (rt.ok) {
+        const data: Ticket[] = await rt.json();
+        setTickets(prev => (JSON.stringify(prev) === JSON.stringify(data) ? prev : data));
       }
-
-      const resFuncionarios = await api(`${API_URL}/operadores?departamentoId=${infoDepartamento.id}&rol=TERRENO`);
-      if (resFuncionarios.ok) {
-        const dataFuncionarios = await resFuncionarios.json();
-        
-        // Filtrar duplicados por ID para evitar que salgan repetidos por errores previos en la DB
-        const funcionariosUnicos = Array.from(new Map(dataFuncionarios.map((f: any) => [f.id, f])).values());
-        setFuncionarios(funcionariosUnicos as Funcionario[]);
+      if (rf.ok) {
+        const data: Operador[] = await rf.json();
+        setFuncionarios(prev => (JSON.stringify(prev) === JSON.stringify(data) ? prev : data));
       }
-    } catch (error) {
-      console.error('Error sincronizando datos:', error);
+    } catch (e) {
+      console.error(e);
     } finally {
-      if (!silencioso) setCargando(false);
+      setCargando(false);
     }
-  };
+  }, [api, deptoId]);
 
-  // 2. Actualizar el useEffect para usar el modo silencioso en el intervalo
+  const cargarDetalle = useCallback(async (id: string) => {
+    setCargandoDetalle(true);
+    try {
+      const res = await api(`/tickets/${id}`);
+      if (res.ok && seleccionRef.current === id) setDetalle(await res.json());
+    } finally {
+      setCargandoDetalle(false);
+    }
+  }, [api]);
+
+  const recargar = useAgrupado(() => {
+    cargar();
+    if (seleccionRef.current) cargarDetalle(seleccionRef.current);
+  }, 350);
+
+  // Al cambiar de departamento (solo la central puede) se parte de cero
   useEffect(() => {
-    if (session?.user) {
-      cargarDatos(); // Carga inicial con animación
-      // Actualización en segundo plano cada 15s (sin interrumpir la interfaz)
-      const interval = setInterval(() => cargarDatos(true), 15000);
-      return () => clearInterval(interval);
-    }
-  }, [session, infoDepartamento.id]);
+    if (!deptoId) return;
+    setCargando(true); setTickets([]); setDetalle(null); setSeleccionadoId(null);
+    conocidos.current = null;
+    cargar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deptoId, !!perfil]);
 
-  // Extraer notificaciones de rechazo desde el historial de los tickets
-  const notificacionesRechazo = useMemo(() => {
-    const alertas: { id: string; ticketCodigo: string; mensaje: string; fecha: string }[] = [];
-    tickets.forEach(ticket => {
-      ticket.historial?.forEach(h => {
-        if (h.comentario && h.comentario.includes('Rechazado por funcionario')) {
-          alertas.push({
-            id: h.id,
-            ticketCodigo: ticket.codigoTicket,
-            mensaje: h.comentario,
-            fecha: h.createdAt
-          });
-        }
-      });
-    });
-    return alertas.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
-  }, [tickets]);
+  const { conectado, avisarCambio } = useTiempoReal({
+    activo: !!perfil,
+    onTicketCambio: e => { if (!e.departamentoId || e.departamentoId === deptoId) recargar(); },
+    onOperadoresCambio: e => { if (!e.departamentoId || e.departamentoId === deptoId) recargar(); },
+  });
+  useRefresco(cargar, conectado, !!perfil);
 
-  const abrirTicket = (ticket: Ticket) => {
-    setTicketSeleccionado(ticket);
-    setModoDespacho(false);
-  };
-
-  const cerrarTicket = () => {
-    setTicketSeleccionado(null);
-    setModoDespacho(false);
-  };
-
-  const asignarFuncionario = async (funcionarioId: string) => {
-    if (!ticketSeleccionado) return;
-    setProcesandoAsignacion(true);
-
-    try {
-      const res = await api(`${API_URL}/tickets/${ticketSeleccionado.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          nuevoEstado: 'EN_REVISION',
-          operadorAsignadoId: funcionarioId 
-        })
-      });
-
-      if (res.ok) {
-        await cargarDatos();
-        cerrarTicket();
-      } else {
-        alert("Error al asignar el funcionario.");
+  // Aviso cuando llega un caso nuevo al departamento
+  useEffect(() => {
+    if (cargando) return;
+    const ids = new Set(tickets.map(t => t.id));
+    if (conocidos.current) {
+      const nuevos = tickets.filter(t => !conocidos.current!.has(t.id) && ESTADOS_ACTIVOS.includes(t.estado));
+      if (nuevos.length) {
+        sonarAlerta("nuevo");
+        avisar({
+          titulo: nuevos.length === 1 ? `Nuevo caso ${nuevos[0].codigoTicket}` : `${nuevos.length} casos nuevos`,
+          mensaje: nuevos.length === 1 ? nuevos[0].categoria?.nombre || undefined : "Revisa la bandeja Por asignar",
+          tipo: "nuevo",
+          accion: nuevos.length === 1 ? { etiqueta: "Abrir", onClick: () => seleccionar(nuevos[0].id) } : undefined,
+        });
       }
-    } catch (error) {
-      console.error(error);
+    }
+    conocidos.current = ids;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tickets, cargando]);
+
+  // --------------------------------------------------------------------------
+  // CLASIFICACIÓN DE LA BANDEJA
+  // --------------------------------------------------------------------------
+  const grupos = useMemo(() => {
+    const g: Record<Pestana, Ticket[]> = { POR_ASIGNAR: [], POR_CONFIRMAR: [], EN_TERRENO: [], CERRADOS: [] };
+    tickets.forEach(t => {
+      if (t.estado === "DESPACHADO") g.EN_TERRENO.push(t);
+      else if (["PENDIENTE", "EN_REVISION"].includes(t.estado)) (t.operadorAsignadoId ? g.POR_CONFIRMAR : g.POR_ASIGNAR).push(t);
+      else if (ahora - new Date(t.updatedAt || t.createdAt).getTime() < 7 * 86400000) g.CERRADOS.push(t);
+    });
+    const urgencia = (a: Ticket, b: Ticket) => PRIORIDADES[prioridadDe(b)].peso - PRIORIDADES[prioridadDe(a)].peso || slaDe(a, ahora).restanteMs - slaDe(b, ahora).restanteMs;
+    g.POR_ASIGNAR.sort(urgencia); g.POR_CONFIRMAR.sort(urgencia); g.EN_TERRENO.sort(urgencia);
+    g.CERRADOS.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+    return g;
+  }, [tickets, ahora]);
+
+  const lista = useMemo(() => {
+    const q = normalizar(texto);
+    return grupos[pestana].filter(t => !q || normalizar(`${t.codigoTicket} ${t.categoria?.nombre} ${t.analisisIA} ${t.descripcionUsuario} ${t.operadorAsignado?.nombre}`).includes(q));
+  }, [grupos, pestana, texto]);
+
+  const alertas = useMemo(() => {
+    const a: { id: string; ticketId: string; codigo: string; tipo: "rechazo" | "reclamo"; texto: string; quien?: string; fecha: string }[] = [];
+    tickets.forEach(t => (t.historial || []).forEach(h => {
+      if (esRechazo(h)) a.push({ id: h.id, ticketId: t.id, codigo: t.codigoTicket, tipo: "rechazo", texto: String(h.comentario).replace(/^Rechazado por funcionario:\s*/, ""), quien: h.operador?.nombre, fecha: h.createdAt });
+      if (esCalificacion(h) && /1\/5/.test(String(h.comentario))) a.push({ id: h.id, ticketId: t.id, codigo: t.codigoTicket, tipo: "reclamo", texto: "El vecino indica que el problema no se resolvió", fecha: h.createdAt });
+    }));
+    return a.filter(x => ahora - new Date(x.fecha).getTime() < 7 * 86400000).sort((x, y) => new Date(y.fecha).getTime() - new Date(x.fecha).getTime());
+  }, [tickets, ahora]);
+  const alertasNuevas = alertas.filter(a => !alertasVistas.includes(a.id)).length;
+
+  // --------------------------------------------------------------------------
+  // ACCIONES
+  // --------------------------------------------------------------------------
+  const seleccionar = useCallback((id: string) => {
+    setSeleccionadoId(id);
+    seleccionRef.current = id;
+    setDetalle(tickets.find(t => t.id === id) || null);
+    cargarDetalle(id);
+  }, [tickets, cargarDetalle]);
+
+  const cerrarDetalle = () => { seleccionRef.current = null; setSeleccionadoId(null); setDetalle(null); setResaltado(null); };
+
+  const actualizar = async (cuerpo: Record<string, unknown>, exito: string, clave = "general") => {
+    if (!detalle) return false;
+    setProcesando(clave);
+    try {
+      const res = await api(`/tickets/${detalle.id}`, { method: "PUT", body: JSON.stringify(cuerpo) });
+      if (!res.ok) {
+        avisar({ titulo: "No se pudo actualizar", mensaje: await mensajeError(res), tipo: "error" });
+        return false;
+      }
+      const t: Ticket = await res.json();
+      setDetalle(t);
+      avisar({ titulo: exito, mensaje: t.codigoTicket, tipo: "ok" });
+      avisarCambio({ id: t.id, tipo: "departamento", departamentoId: t.departamentoId ?? undefined, operadorAsignadoId: t.operadorAsignadoId ?? undefined });
+      cargar();
+      return true;
     } finally {
-      setProcesandoAsignacion(false);
+      setProcesando(null);
     }
   };
 
-  const ticketsEnMapa = (ticketSeleccionado && modoDespacho) 
-    ? tickets.filter(t => t.id === ticketSeleccionado.id) 
-    : tickets;
+  const asignar = async (f: Operador) => {
+    const ok = await actualizar({ nuevoEstado: "EN_REVISION", operadorAsignadoId: f.id }, `Asignado a ${f.nombre}`, f.id);
+    if (ok) { setResaltado(null); setPestana("POR_CONFIRMAR"); }
+  };
 
-  const calcularDistancia = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-    const R = 6371;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
+  const confirmarModal = async () => {
+    const motivo = textoModal.trim();
+    const ok = modal === "DESCARTAR"
+      ? await actualizar({ nuevoEstado: "DESCARTADO", comentario: motivo }, "Reporte descartado")
+      : await actualizar({ notaInterna: true, comentario: motivo }, "Nota agregada");
+    if (ok) { setModal(null); setTextoModal(""); }
   };
 
   const funcionariosOrdenados = useMemo(() => {
-    if (!ticketSeleccionado || !ticketSeleccionado.latitud || !ticketSeleccionado.longitud) return funcionarios;
-    return [...funcionarios].sort((a, b) => {
-      if (!a.latitud || !b.latitud) return 0;
-      const distA = calcularDistancia(ticketSeleccionado.latitud!, ticketSeleccionado.longitud!, a.latitud, a.longitud!);
-      const distB = calcularDistancia(ticketSeleccionado.latitud!, ticketSeleccionado.longitud!, b.latitud, b.longitud!);
-      return distA - distB;
-    });
-  }, [funcionarios, ticketSeleccionado]);
+    const t = detalle;
+    return funcionarios.map(f => {
+      const km = t?.latitud != null && f.latitud != null ? distanciaKm(t.latitud, t.longitud!, f.latitud, f.longitud!) : null;
+      const rechazo = t?.historial?.find(h => esRechazo(h) && h.operadorId === f.id);
+      return { f, km, rechazo };
+    }).sort((a, b) => Number(b.f.gpsActivo) - Number(a.f.gpsActivo) || (a.km ?? 999) - (b.km ?? 999));
+  }, [funcionarios, detalle]);
+
+  const lineaDespacho = useMemo(() => {
+    if (!detalle || detalle.latitud == null) return null;
+    const f = funcionarios.find(x => x.id === (resaltado || (detalle.estado === "DESPACHADO" ? detalle.operadorAsignadoId : null)));
+    if (!f || f.latitud == null) return null;
+    return { desde: [f.latitud, f.longitud!] as [number, number], hasta: [detalle.latitud, detalle.longitud!] as [number, number] };
+  }, [detalle, funcionarios, resaltado]);
+
+  const metricas = useMemo(() => {
+    const inicio = new Date(ahora); inicio.setHours(0, 0, 0, 0);
+    const activos = tickets.filter(t => ESTADOS_ACTIVOS.includes(t.estado));
+    return {
+      atrasados: activos.filter(t => slaDe(t, ahora).vencido).length,
+      resueltosHoy: tickets.filter(t => t.estado === "RESUELTO" && new Date(t.updatedAt || 0).getTime() >= inicio.getTime()).length,
+      gps: funcionarios.filter(f => f.gpsActivo).length,
+    };
+  }, [tickets, funcionarios, ahora]);
+
+  // --------------------------------------------------------------------------
+  // RENDER
+  // --------------------------------------------------------------------------
+  if (errorPerfil) return <PantallaCarga texto={errorPerfil} />;
+  if (!perfil) return <PantallaCarga />;
+  if (!deptoId || !depto) {
+    return (
+      <div className="fondo-rejilla" style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+        <div className="modal marco"><div className="modal-cabecera"><h3 className="titulo-2">Sin departamento asignado</h3></div>
+          <div className="modal-cuerpo"><p style={{ margin: 0 }}>Tu cuenta no tiene un departamento. Pide a la central C4 que te lo asigne desde Administración.</p></div>
+          <div className="modal-pie"><button className="btn btn-primario" onClick={() => signOut({ callbackUrl: "/login" })}>Cerrar sesión</button></div>
+        </div>
+      </div>
+    );
+  }
+
+  const pestanas: { id: Pestana; etiqueta: string }[] = [
+    { id: "POR_ASIGNAR", etiqueta: "Por asignar" },
+    { id: "POR_CONFIRMAR", etiqueta: "Por confirmar" },
+    { id: "EN_TERRENO", etiqueta: "En terreno" },
+    { id: "CERRADOS", etiqueta: "Cerrados 7 d" },
+  ];
+  const ticketsMapa = pestana === "CERRADOS" ? grupos.CERRADOS : tickets.filter(t => ESTADOS_ACTIVOS.includes(t.estado));
+  const cerrado = detalle && ["RESUELTO", "DESCARTADO"].includes(detalle.estado);
 
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', backgroundColor: '#f8fafc', overflow: 'hidden', fontFamily: 'system-ui, sans-serif' }}>
-      
-      {/* PANEL LATERAL DEL DEPARTAMENTO */}
-      <div style={{ width: '420px', backgroundColor: '#ffffff', borderRight: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', zIndex: 20, boxShadow: '4px 0 15px rgba(0,0,0,0.05)' }}>
-        
-        <div style={{ padding: '24px', borderBottom: '1px solid #e2e8f0', backgroundColor: infoDepartamento.color, color: 'white' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <span style={{ fontSize: '10px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', opacity: 0.9 }}>
-                Centro de Despacho
-              </span>
-              <h1 style={{ fontSize: '20px', fontWeight: 900, margin: '4px 0 0 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <FiTarget /> {infoDepartamento.nombre}
-              </h1>
-            </div>
-            
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              {/* BOTÓN DE NOTIFICACIONES */}
-              <button 
-                onClick={() => setMostrarNotificaciones(!mostrarNotificaciones)}
-                style={{ position: 'relative', background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', cursor: 'pointer', padding: '8px', borderRadius: '8px', backdropFilter: 'blur(4px)' }}
-                title="Notificaciones de rechazo"
-              >
-                <FiBell size={16} />
-                {notificacionesRechazo.length > 0 && (
-                  <span style={{ position: 'absolute', top: -4, right: -4, backgroundColor: '#ef4444', color: 'white', fontSize: '9px', fontWeight: 900, width: '16px', height: '16px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {notificacionesRechazo.length}
-                  </span>
-                )}
-              </button>
-
-              <button 
-                onClick={() => signOut({ callbackUrl: '/' })} 
-                style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', cursor: 'pointer', padding: '8px', borderRadius: '8px', backdropFilter: 'blur(4px)' }} 
-                title="Cerrar Sesión"
-              >
-                <FiLogOut size={16} />
-              </button>
-            </div>
-          </div>
-
-          <div style={{ marginTop: '16px', display: 'flex', gap: '12px', fontSize: '12px', fontWeight: 600 }}>
-            <div style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: '6px 12px', borderRadius: '999px' }}>
-              {tickets.length} Casos Activos
-            </div>
-            <div style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: '6px 12px', borderRadius: '999px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ width: '8px', height: '8px', backgroundColor: '#4ade80', borderRadius: '50%' }}></span>
-              {funcionarios.length} Funcionarios Totales
-            </div>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {/* =================== CABECERA =================== */}
+      <header style={{ height: 58, flexShrink: 0, background: "var(--marino)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 18px", borderBottom: `3px solid ${depto.color}` }}>
+        <div className="fila" style={{ gap: 18 }}>
+          <Logo tamano={28} />
+          <span style={{ width: 1, height: 28, background: "var(--marino-borde)" }} />
+          <div className="anim-izquierda">
+            <div className="rotulo" style={{ color: "var(--marino-texto)", fontSize: 9 }}>Centro de despacho</div>
+            {perfil.rol === "ADMINISTRADOR" ? (
+              <select value={deptoAdmin} onChange={e => setDeptoAdmin(Number(e.target.value))} style={{ background: "transparent", border: 0, color: "#fff", fontWeight: 700, fontSize: 15, padding: 0 }}>
+                {DEPARTAMENTOS.map(d => <option key={d.id} value={d.id} style={{ color: "#000" }}>{d.nombre} (supervisión)</option>)}
+              </select>
+            ) : <div style={{ fontWeight: 700, fontSize: 15 }}>{depto.nombre}</div>}
           </div>
         </div>
-
-        {/* PANEL DESPLEGABLE DE NOTIFICACIONES */}
-        {mostrarNotificaciones && (
-          <div style={{ backgroundColor: '#1e293b', color: 'white', padding: '16px', borderBottom: '1px solid #334155', maxHeight: '220px', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px', color: '#cbd5e1' }}>Alertas de Rechazo Operativo</span>
-              <button onClick={() => setMostrarNotificaciones(false)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' }}><FiX size={16} /></button>
-            </div>
-            {notificacionesRechazo.length === 0 ? (
-              <p style={{ fontSize: '11px', color: '#94a3b8', margin: 0 }}>No hay rechazos recientes de unidades.</p>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {notificacionesRechazo.map((notif) => (
-                  <div key={notif.id} style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '10px', borderRadius: '8px', fontSize: '11px' }}>
-                    <div style={{ fontWeight: 900, color: '#fca5a5', marginBottom: '2px' }}>Ticket: {notif.ticketCodigo}</div>
-                    <div style={{ color: '#f1f5f9' }}>{notif.mensaje}</div>
+        <div className="fila" style={{ gap: 14 }}>
+          <IndicadorConexion conectado={conectado} claro />
+          <div style={{ position: "relative" }}>
+            <button onClick={() => { setPanelAlertas(!panelAlertas); }} title="Alertas" style={{ position: "relative", width: 34, height: 34, background: panelAlertas ? "var(--marino-3)" : "transparent", border: "1px solid var(--marino-borde)", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+              <FiBell size={15} style={{ animation: alertasNuevas ? "sacudir 0.6s ease 2" : undefined }} />
+              {alertasNuevas > 0 && <span className="mono" style={{ position: "absolute", top: -6, right: -6, background: "var(--peligro)", color: "#fff", fontSize: 10, fontWeight: 600, minWidth: 18, height: 18, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{alertasNuevas}</span>}
+            </button>
+            {panelAlertas && (
+              <div className="anim-escalar" style={{ position: "absolute", right: 0, top: 42, width: 360, maxHeight: 420, overflow: "auto", background: "var(--superficie)", color: "var(--texto)", border: "1px solid var(--borde)", boxShadow: "var(--sombra-3)", zIndex: 40 }}>
+                <div className="fila entre" style={{ padding: "10px 12px", borderBottom: "1px solid var(--borde)" }}>
+                  <span className="titulo-3">Alertas de los últimos 7 días</span>
+                  <div className="fila" style={{ gap: 4 }}>
+                    {alertasNuevas > 0 && <button className="btn btn-fantasma btn-sm" onClick={() => setAlertasVistas(alertas.map(a => a.id))}>Marcar leídas</button>}
+                    <button className="btn-icono" style={{ width: 28, height: 28 }} onClick={() => setPanelAlertas(false)}><FiX size={14} /></button>
                   </div>
+                </div>
+                {alertas.length === 0 ? <div style={{ padding: 16 }} className="texto-3">Sin rechazos ni reclamos recientes.</div> : alertas.map((a, i) => (
+                  <button key={a.id} className="anim-arriba" onClick={() => { seleccionar(a.ticketId); setPanelAlertas(false); setAlertasVistas([...new Set([...alertasVistas, a.id])]); }}
+                    style={{ ["--i" as any]: i, display: "block", width: "100%", textAlign: "left", padding: "10px 12px", border: 0, borderBottom: "1px solid var(--borde)", borderLeft: `3px solid ${a.tipo === "rechazo" ? "var(--peligro)" : "#C08A00"}`, background: alertasVistas.includes(a.id) ? "var(--superficie)" : "var(--peligro-suave)" }}>
+                    <div className="fila entre">
+                      <span className="fila" style={{ gap: 6, fontWeight: 600, fontSize: 12 }}>{a.tipo === "rechazo" ? <FiAlertTriangle size={12} color="var(--peligro)" /> : <FiStar size={12} color="#C08A00" />}{a.tipo === "rechazo" ? "Tarea rechazada" : "Reclamo del vecino"}</span>
+                      <span className="mono texto-3" style={{ fontSize: 10.5 }}>{tiempoRelativo(a.fecha, ahora)}</span>
+                    </div>
+                    <div className="mono" style={{ fontSize: 11.5, marginTop: 2 }}>{a.codigo}{a.quien ? ` | ${a.quien}` : ""}</div>
+                    <div className="texto-2" style={{ fontSize: 12, marginTop: 2 }}>{a.texto}</div>
+                  </button>
                 ))}
               </div>
             )}
           </div>
-        )}
+          <span style={{ width: 1, height: 28, background: "var(--marino-borde)" }} />
+          <div className="oculto-movil" style={{ textAlign: "right" }}>
+            <div style={{ fontWeight: 600, fontSize: 12.5 }}>{perfil.nombre}</div>
+            <div className="rotulo" style={{ color: "var(--marino-texto)", fontSize: 9 }}>{perfil.rol === "ADMINISTRADOR" ? "Central C4" : "Jefatura"}</div>
+          </div>
+          <button onClick={() => signOut({ callbackUrl: "/login" })} title="Cerrar sesión" style={{ width: 34, height: 34, background: "transparent", border: "1px solid var(--marino-borde)", color: "var(--marino-texto)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+            <FiLogOut size={14} />
+          </button>
+        </div>
+      </header>
 
-        <div style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f8fafc' }}>
-          {cargando ? (
-            <div style={{ padding: '40px 20px', textAlign: 'center', color: '#64748b' }}>
-              <div style={{ width: '24px', height: '24px', border: '3px solid #0284c7', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 12px auto' }}></div>
-              <p style={{ fontSize: '12px', fontWeight: 700 }}>SINCRONIZANDO OPERACIONES...</p>
-            </div>
-          ) : !ticketSeleccionado ? (
-            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {tickets.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
-                  <FiCheckCircle size={32} style={{ marginBottom: '12px' }} />
-                  <h3 style={{ fontSize: '14px', margin: 0 }}>Bandeja al día</h3>
-                  <p style={{ fontSize: '12px', margin: '4px 0 0 0' }}>No hay incidentes pendientes de despacho.</p>
-                </div>
-              ) : (
-                tickets.map(ticket => (
-                  <div 
-                    key={ticket.id} 
-                    onClick={() => abrirTicket(ticket)}
-                    style={{ padding: '16px', backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '16px', cursor: 'pointer', transition: 'all 0.2s', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', borderLeft: ticket.operadorAsignadoId ? '4px solid #10b981' : '4px solid #f59e0b' }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                      <span style={{ fontSize: '13px', fontWeight: 900, color: '#0f172a' }}>{ticket.codigoTicket}</span>
-                      {/* LÓGICA DE ESTADOS EN EL LISTADO DEL DEPARTAMENTO */}
-                      {ticket.operadorAsignadoId ? (
-                        ticket.estado === 'DESPACHADO' ? (
-                        <span style={{ fontSize: '10px', fontWeight: 800, padding: '4px 8px', borderRadius: '8px', backgroundColor: '#ecfdf5', color: '#059669', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <FiTruck /> MÓVIL EN RUTA
-                        </span>
-                      ) : (
-                        <span style={{ fontSize: '10px', fontWeight: 800, padding: '4px 8px', borderRadius: '8px', backgroundColor: '#e0e7ff', color: '#4f46e5', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <FiClock /> ESPERANDO CONFIRMACIÓN
-                        </span>
-                        )
-                      ) : (
-                        <span style={{ fontSize: '10px', fontWeight: 800, padding: '4px 8px', borderRadius: '8px', backgroundColor: '#fffbeb', color: '#d97706', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <FiAlertCircle /> PENDIENTE ASIGNAR
-                        </span>
-                       )}
-                    </div>
-                    <h3 style={{ fontSize: '12px', fontWeight: 700, color: '#475569', margin: '0 0 6px 0' }}>
-                      {ticket.categoria?.nombre || 'Clasificación Pendiente'}
-                    </h3>
-                    <p style={{ fontSize: '11px', color: '#64748b', margin: 0, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {ticket.descripcionUsuario}
-                    </p>
-                  </div>
-                ))
-              )}
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-              <div style={{ padding: '16px 20px', backgroundColor: 'white', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'sticky', top: 0, zIndex: 10 }}>
-                <button 
-                  onClick={cerrarTicket} 
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: 'none', color: '#475569', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', padding: 0 }}
-                >
-                  <FiArrowLeft size={16} /> Volver a bandeja
-                </button>
-              </div>
+      <div style={{ flex: 1, minHeight: 0, padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* KPIs */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 10 }}>
+          {[
+            { t: "Por asignar", v: grupos.POR_ASIGNAR.length, c: "var(--alerta)", p: "POR_ASIGNAR" as Pestana },
+            { t: "Esperando confirmación", v: grupos.POR_CONFIRMAR.length, c: "var(--acento)", p: "POR_CONFIRMAR" as Pestana },
+            { t: "En terreno", v: grupos.EN_TERRENO.length, c: "#7048E8", p: "EN_TERRENO" as Pestana },
+            { t: "Fuera de plazo", v: metricas.atrasados, c: "var(--peligro)" },
+            { t: "Resueltos hoy", v: metricas.resueltosHoy, c: "var(--ok)", p: "CERRADOS" as Pestana },
+            { t: "Funcionarios con GPS", v: metricas.gps, c: "var(--ok)", d: `de ${funcionarios.length} en el equipo` },
+          ].map((k, i) => (
+            <button key={k.t} onClick={() => k.p && (setPestana(k.p), cerrarDetalle())} style={{ padding: 0, border: 0, background: "none", textAlign: "left" }}>
+              <Kpi i={i} titulo={k.t} valor={k.v} color={k.c} detalle={k.d} />
+            </button>
+          ))}
+        </div>
 
-              <div style={{ padding: '20px', flex: 1, overflowY: 'auto' }}>
-                <div style={{ marginBottom: '24px' }}>
-                  <span style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' }}>Detalle de Incidente</span>
-                  <h2 style={{ fontSize: '18px', fontWeight: 900, color: '#0f172a', margin: '4px 0 12px 0' }}>{ticketSeleccionado.codigoTicket}</h2>
-                  
-                  <div style={{ backgroundColor: '#f1f5f9', padding: '12px', borderRadius: '12px', fontSize: '12px', color: '#334155', lineHeight: 1.5, marginBottom: '16px' }}>
-                    <FiMapPin style={{ color: '#0284c7', marginRight: '6px' }} /> 
-                    Coordenadas: {ticketSeleccionado.latitud?.toFixed(5)}, {ticketSeleccionado.longitud?.toFixed(5)}
-                  </div>
-                  
-                  <p style={{ fontSize: '13px', color: '#475569', lineHeight: 1.6, margin: 0 }}>
-                    {ticketSeleccionado.descripcionUsuario}
-                  </p>
-                </div>
-
-                <div style={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-                  {!modoDespacho ? (
-                    <button 
-                      onClick={() => setModoDespacho(true)}
-                      style={{ width: '100%', backgroundColor: infoDepartamento.color, color: 'white', padding: '16px', borderRadius: '12px', border: 'none', fontWeight: 900, fontSize: '14px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
-                    >
-                      <FiTarget size={18} /> INICIAR PROTOCOLO DE DESPACHO
-                    </button>
+        <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 12 }}>
+          {/* =================== BANDEJA / DETALLE =================== */}
+          <div className="panel" style={{ width: 450, flexShrink: 0, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+            {detalle ? (
+              <DetalleTicket
+                key={detalle.id}
+                ticket={detalle}
+                ahora={ahora}
+                onCerrar={cerrarDetalle}
+                cargando={cargandoDetalle}
+                acciones={
+                  cerrado ? (
+                    <button className="btn btn-secundario btn-sm btn-bloque" onClick={() => { setTextoModal(""); setModal("NOTA"); }}><FiEdit3 size={12} /> Nota interna</button>
                   ) : (
-                    <>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                        <h3 style={{ fontSize: '12px', fontWeight: 900, color: '#0f172a', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <FiTruck color="#0284c7" /> PERSONAL DISPONIBLE
-                        </h3>
-                        <span style={{ fontSize: '10px', backgroundColor: '#e0f2fe', color: '#0284c7', padding: '4px 8px', borderRadius: '8px', fontWeight: 800 }}>
-                          LISTA GENERAL
-                        </span>
+                    <div className="columna" style={{ gap: 10 }}>
+                      <div className="fila entre">
+                        <span className="rotulo fila" style={{ gap: 6 }}><FiUsers size={12} /> {detalle.operadorAsignadoId ? "Reasignar funcionario" : "Asignar funcionario"}</span>
+                        <span className="texto-3" style={{ fontSize: 10.5 }}>Ordenados por GPS y distancia</span>
                       </div>
-
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                        {funcionariosOrdenados.length === 0 ? (
-                          <div style={{ padding: '20px', textAlign: 'center', backgroundColor: '#f8fafc', borderRadius: '12px', border: '1px dashed #cbd5e1' }}>
-                            <p style={{ fontSize: '12px', color: '#64748b', fontWeight: 600, margin: 0 }}>No hay funcionarios registrados en {infoDepartamento.nombre}.</p>
-                          </div>
-                        ) : (
-                          funcionariosOrdenados.map((func) => {
-                            const dist = ticketSeleccionado.latitud && func.latitud 
-                              ? calcularDistancia(ticketSeleccionado.latitud, ticketSeleccionado.longitud!, func.latitud, func.longitud!).toFixed(1) 
-                              : '?';
-                            
-                            const esAsignado = ticketSeleccionado.operadorAsignadoId === func.id;
-
-                            // Verificar si este funcionario rechazó este ticket en el historial
-                            const rechazoHistorial = ticketSeleccionado.historial?.find(h => 
-                              h.comentario?.includes('Rechazado por funcionario') && h.comentario.includes(func.nombre)
-                            );
-
-                            return (
-                              <div key={func.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', backgroundColor: esAsignado ? '#ecfdf5' : '#f8fafc', border: esAsignado ? '1px solid #10b981' : '1px solid #e2e8f0', borderRadius: '12px' }}>
-                                <div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    <span style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>{func.nombre}</span>
-                                    <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', backgroundColor: func.gpsActivo ? '#dcfce7' : '#f1f5f9', color: func.gpsActivo ? '#166534' : '#64748b', fontWeight: 800 }}>
-                                      {func.gpsActivo ? 'GPS ON' : 'GPS OFF'}
-                                    </span>
+                      <div className="desplazable columna" style={{ gap: 4, maxHeight: 230 }}>
+                        {funcionariosOrdenados.length === 0 && <div className="vacio" style={{ padding: 14 }}>No hay funcionarios de terreno en {depto.nombre}.</div>}
+                        {funcionariosOrdenados.map(({ f, km, rechazo }, i) => {
+                          const asignado = detalle.operadorAsignadoId === f.id;
+                          const carga = f._count?.ticketsAsignados ?? 0;
+                          return (
+                            <div key={f.id} className="anim-arriba" onMouseEnter={() => setResaltado(f.id)} onMouseLeave={() => setResaltado(null)}
+                              style={{ ["--i" as any]: i, display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", border: `1px solid ${asignado ? "var(--ok)" : resaltado === f.id ? "var(--acento)" : "var(--borde)"}`, background: asignado ? "var(--ok-suave)" : "var(--superficie)", transition: "border-color 0.15s" }}>
+                              <span className="mono" style={{ width: 30, height: 30, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", background: f.gpsActivo ? "var(--ok)" : "var(--superficie-3)", color: f.gpsActivo ? "#fff" : "var(--texto-2)", fontSize: 11, fontWeight: 600 }}>
+                                {f.nombre.split(/\s+/).map(p => p[0]).join("").slice(0, 2).toUpperCase()}
+                              </span>
+                              <div className="crece">
+                                <div className="truncar" style={{ fontWeight: 600, fontSize: 12.5 }}>{f.nombre}</div>
+                                {rechazo ? (
+                                  <div className="truncar" style={{ fontSize: 11, color: "var(--peligro)", fontWeight: 600 }}>Rechazó: {String(rechazo.comentario).replace(/^Rechazado por funcionario:\s*/, "")}</div>
+                                ) : (
+                                  <div className="fila texto-3" style={{ fontSize: 11, gap: 8 }}>
+                                    <span style={{ color: f.gpsActivo ? "var(--ok)" : undefined, fontWeight: 600 }}>{f.gpsActivo ? "GPS activo" : "GPS apagado"}</span>
+                                    <span className="mono">{km != null ? `${km.toFixed(1)} km` : "--"}</span>
+                                    <span>{carga} tarea{carga === 1 ? "" : "s"}</span>
                                   </div>
-
-                                  {/* ETIQUETA SI RECHAZÓ ESTE TICKET */}
-                                  {rechazoHistorial ? (
-                                    <span style={{ display: 'block', fontSize: '10px', color: '#dc2626', fontWeight: 800, marginTop: '2px' }}>
-                                      ⚠️ Rechazado: {rechazoHistorial.comentario.split(':')[1] || 'Motivo no especificado'}
-                                    </span>
-                                  ) : (
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#64748b', marginTop: '4px', fontWeight: 600 }}>
-                                      <FiClock size={10} /> a {dist} km aprox.
-                                    </span>
-                                  )}
-                                </div>
-
-                                <button 
-                                  onClick={() => asignarFuncionario(func.id)}
-                                  disabled={procesandoAsignacion || esAsignado}
-                                  style={{ backgroundColor: esAsignado ? '#10b981' : '#0284c7', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '8px', fontSize: '11px', fontWeight: 800, cursor: (procesandoAsignacion || esAsignado) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px', opacity: procesandoAsignacion ? 0.7 : 1 }}
-                                >
-                                  {esAsignado ? (
-                                    <><FiCheckCircle /> ASIGNADO</>
-                                  ) : (
-                                    <><FiUserCheck /> {rechazoHistorial ? 'REASIGNAR' : 'ASIGNAR'}</>
-                                  )}
-                                </button>
+                                )}
                               </div>
-                            )
-                          })
-                        )}
+                              <button className={`btn btn-sm ${asignado ? "btn-ok" : "btn-primario"}`} disabled={!!procesando || asignado} onClick={() => asignar(f)}>
+                                {procesando === f.id ? <span className="girador" style={{ width: 12, height: 12 }} /> : asignado ? <FiCheck size={12} /> : <FiUserCheck size={12} />}
+                                {asignado ? "Asignado" : rechazo ? "Reintentar" : "Asignar"}
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
-                      
-                      <button 
-                        onClick={() => setModoDespacho(false)}
-                        style={{ width: '100%', marginTop: '16px', padding: '12px', background: 'transparent', border: '1px solid #cbd5e1', borderRadius: '12px', color: '#64748b', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}
-                      >
-                        Cancelar Despacho
-                      </button>
-                    </>
-                  )}
+                      <div className="fila" style={{ gap: 6 }}>
+                        <button className="btn btn-secundario btn-sm crece" onClick={() => { setTextoModal(""); setModal("NOTA"); }}><FiEdit3 size={12} /> Nota interna</button>
+                        <button className="btn btn-peligro-borde btn-sm crece" onClick={() => { setTextoModal(""); setModal("DESCARTAR"); }}><FiSlash size={12} /> Descartar</button>
+                      </div>
+                    </div>
+                  )
+                }
+              />
+            ) : (
+              <>
+                <div className="pestanas" style={{ padding: "0 8px" }}>
+                  {pestanas.map(p => (
+                    <button key={p.id} className={`pestana${pestana === p.id ? " activa" : ""}`} onClick={() => setPestana(p.id)}>
+                      {p.etiqueta}<span className="contador">{grupos[p.id].length}</span>
+                    </button>
+                  ))}
                 </div>
-              </div>
+                <div style={{ padding: 10, borderBottom: "1px solid var(--borde)" }}>
+                  <div className="input-con-icono">
+                    <FiSearch size={14} />
+                    <input className="input" placeholder="Buscar código, texto o funcionario" value={texto} onChange={e => setTexto(e.target.value)} />
+                  </div>
+                </div>
+                <div key={pestana} className="desplazable" style={{ flex: 1, padding: 10, display: "flex", flexDirection: "column", gap: 6, background: "var(--superficie-2)" }}>
+                  {cargando ? <Esqueleto alto={96} filas={5} /> : lista.length === 0 ? (
+                    <Vacio icono={<FiInbox size={22} />} titulo={pestana === "POR_ASIGNAR" ? "Bandeja al día" : "Sin casos en esta etapa"} texto={pestana === "POR_ASIGNAR" ? "No hay reportes esperando un funcionario." : undefined} />
+                  ) : lista.map((t, i) => {
+                    const cat = categoriaInfo(t.categoria?.nombre);
+                    const p = PRIORIDADES[prioridadDe(t)];
+                    const rechazado = t.historial?.[0] && esRechazo(t.historial[0]);
+                    return (
+                      <button key={t.id} className="item-lista anim-arriba" onClick={() => seleccionar(t.id)} style={{ ["--color-item" as any]: cat.color, ["--i" as any]: Math.min(i, 14) }}>
+                        <div className="fila entre">
+                          <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{t.codigoTicket}</span>
+                          <span className="mono texto-3" style={{ fontSize: 10.5 }}>{tiempoRelativo(t.createdAt, ahora)}</span>
+                        </div>
+                        <div className="fila" style={{ gap: 6, marginTop: 6 }}>
+                          <span style={{ color: cat.color, display: "inline-flex" }}><Icono nombre={cat.icono} size={14} /></span>
+                          <span className="truncar" style={{ fontWeight: 600, fontSize: 12.5 }}>{cat.nombre}</span>
+                          <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: p.color }}>{p.etiqueta}</span>
+                        </div>
+                        <div className="dos-lineas texto-2" style={{ fontSize: 11.5, marginTop: 4 }}>{t.analisisIA || resumenDescripcion(t.descripcionUsuario)}</div>
+                        <div className="fila entre" style={{ marginTop: 8, gap: 8 }}>
+                          <span className="fila" style={{ gap: 6, minWidth: 0 }}>
+                            {rechazado ? <span className="insignia" style={{ color: "var(--peligro)" }}>Rechazado</span>
+                              : t.estado === "PENDIENTE" ? <span className="insignia" style={{ color: "var(--alerta)" }} title="La IA lo envió aquí; la central C4 aún no lo valida">Sugerido por IA</span>
+                              : <InsigniaEstado estado={t.estado} />}
+                            {t.operadorAsignado && <span className="truncar texto-3" style={{ fontSize: 11 }}>{t.operadorAsignado.nombre}</span>}
+                          </span>
+                          {ESTADOS_ACTIVOS.includes(t.estado) ? <IndicadorSla ticket={t} ahora={ahora} /> : <span className="mono texto-3" style={{ fontSize: 10.5 }}>{horaCorta(t.updatedAt)}</span>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* =================== MAPA =================== */}
+          <div className="panel" style={{ flex: 1, minWidth: 0, position: "relative", overflow: "hidden" }}>
+            <Mapa
+              tickets={detalle ? ticketsMapa.filter(t => t.id === detalle.id).concat(ticketsMapa.some(t => t.id === detalle.id) ? [] : [detalle]) : ticketsMapa}
+              onSeleccionar={seleccionar}
+              seleccionadoId={seleccionadoId}
+              enfoque={detalle && detalle.latitud != null && !lineaDespacho ? [detalle.latitud, detalle.longitud!] : null}
+              funcionarios={mostrarPersonal ? funcionarios : []}
+              lineaDespacho={lineaDespacho}
+            />
+            <div style={{ position: "absolute", right: 12, bottom: 40, zIndex: 5 }}>
+              <button className={`btn btn-sm ${mostrarPersonal ? "btn-oscuro" : "btn-secundario"}`} onClick={() => setMostrarPersonal(!mostrarPersonal)}>
+                <FiNavigation size={12} /> {mostrarPersonal ? "Ocultar personal" : "Mostrar personal"} ({metricas.gps} con GPS)
+              </button>
             </div>
-          )}
+          </div>
         </div>
       </div>
 
-      {/* MAPA */}
-      <div style={{ flex: 1, position: 'relative', backgroundColor: '#e2e8f0' }}>
-        {modoDespacho && (
-          <div style={{ position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 30, backgroundColor: 'rgba(15, 23, 42, 0.9)', color: 'white', padding: '12px 24px', borderRadius: '999px', display: 'flex', alignItems: 'center', gap: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.2)', backdropFilter: 'blur(4px)' }}>
-            <div style={{ width: '10px', height: '10px', backgroundColor: '#ef4444', borderRadius: '50%', animation: 'pulse 1.5s infinite' }}></div>
-            <span style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '1px' }}>MODO DESPACHO ACTIVO • RASTREANDO UNIDADES</span>
+      <Modal abierto={!!modal} onCerrar={() => setModal(null)} titulo={modal === "DESCARTAR" ? "Descartar reporte" : "Agregar nota interna"} subtitulo={detalle?.codigoTicket}
+        pie={<>
+          <button className="btn btn-fantasma" onClick={() => setModal(null)}>Cancelar</button>
+          <button className={`btn ${modal === "DESCARTAR" ? "btn-peligro" : "btn-primario"}`} disabled={!!procesando || textoModal.trim().length < 5} onClick={confirmarModal}>
+            {modal === "DESCARTAR" ? "Descartar y avisar al vecino" : "Guardar nota"}
+          </button>
+        </>}>
+        {modal === "DESCARTAR" && (
+          <div className="columna" style={{ gap: 4 }}>
+            {MOTIVOS_DESCARTE.map(m => (
+              <button key={m} className="item-lista" onClick={() => setTextoModal(m)} style={{ padding: "8px 12px 8px 16px", ["--color-item" as any]: textoModal === m ? "var(--peligro)" : "var(--borde)", borderColor: textoModal === m ? "var(--peligro)" : undefined, fontSize: 12.5 }}>{m}</button>
+            ))}
           </div>
         )}
-
-        <MapComponent 
-          tickets={ticketsEnMapa} 
-          fantasmas={modoDespacho ? funcionarios : []} // Solo muestra los móviles al iniciar despacho
-          coordenadaSeleccionada={ticketSeleccionado && modoDespacho ? [ticketSeleccionado.latitud!, ticketSeleccionado.longitud!] : null} 
-          onTicketSelect={(id) => {
-            const t = tickets.find(x => x.id === id);
-            if(t && !modoDespacho) abrirTicket(t);
-          }} 
-        />
-      </div>
-      
+        <textarea className="textarea" autoFocus value={textoModal} onChange={e => setTextoModal(e.target.value)} maxLength={500} placeholder={modal === "DESCARTAR" ? "Motivo (lo recibe el vecino)" : "Nota visible solo para el personal"} />
+      </Modal>
     </div>
   );
 }
