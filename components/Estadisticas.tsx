@@ -8,7 +8,7 @@ import {
 import type { Ticket } from "../lib/tipos";
 import {
   ESTADOS, ORDEN_ESTADOS, PRIORIDADES, ORDEN_PRIORIDADES, DEPARTAMENTOS, CATEGORIAS, ESTADOS_ACTIVOS,
-  categoriaInfo, prioridadDe, slaDe, fechaCierre, fechaPrimeraGestion, calificacionDe, formatearTelefono, fechaHora,
+  categoriaInfo, prioridadDe, slaDe, fechaCierre, fechaPrimeraGestion, calificacionDe, fechaHora,
 } from "../lib/constantes";
 import { unidadVecinalDe } from "../lib/geo";
 import { Kpi, Vacio } from "./ui/Comunes";
@@ -168,7 +168,7 @@ export default function Estadisticas({ tickets, ahora }: { tickets: Ticket[]; ah
   };
 
   const exportarCSV = () => {
-    const filas = [["codigo", "fecha_ingreso", "estado", "categoria", "departamento", "prioridad", "funcionario", "unidad_vecinal", "latitud", "longitud", "fecha_cierre", "horas_cierre", "dentro_de_plazo", "calificacion", "telefono"]];
+    const filas = [["codigo", "fecha_ingreso", "estado", "categoria", "departamento", "prioridad", "funcionario", "unidad_vecinal", "latitud", "longitud", "fecha_cierre", "horas_cierre", "dentro_de_plazo", "calificacion"]];
     filtrados.forEach(t => {
       const fc = fechaCierre(t);
       filas.push([
@@ -176,7 +176,7 @@ export default function Estadisticas({ tickets, ahora }: { tickets: Ticket[]; ah
         PRIORIDADES[prioridadDe(t)].etiqueta, t.operadorAsignado?.nombre || "", unidadVecinalDe(t.latitud, t.longitud) || "",
         String(t.latitud ?? ""), String(t.longitud ?? ""), fc ? fechaHora(fc) : "",
         fc ? (horas(fc.getTime() - new Date(t.createdAt).getTime())).toFixed(1) : "",
-        fc ? (slaDe(t, ahora).vencido ? "no" : "si") : "", String(calificacionDe(t) ?? ""), formatearTelefono(t.ciudadano?.telefono),
+        fc ? (slaDe(t, ahora).vencido ? "no" : "si") : "", String(calificacionDe(t) ?? ""),
       ]);
     });
     const csv = "﻿" + filas.map(f => f.map(v => `"${String(v).replace(/"/g, '""')}"`).join(";")).join("\n");

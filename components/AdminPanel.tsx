@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FiUsers, FiGrid, FiShield, FiSearch, FiEdit2, FiRefreshCw, FiInfo, FiLock, FiUnlock } from "react-icons/fi";
+import { FiUsers, FiGrid, FiShield, FiSearch, FiEdit2, FiRefreshCw, FiInfo, FiLock, FiUnlock, FiFileText, FiList, FiUserX } from "react-icons/fi";
+import { SolicitudesDatos, Auditoria } from "./PrivacidadAdmin";
 import type { Operador, Ciudadano, Ticket, Rol } from "../lib/tipos";
 import { DEPARTAMENTOS, ESTADOS_ACTIVOS, normalizar, tiempoRelativo, formatearTelefono, slaDe, fechaHora, ESTADOS } from "../lib/constantes";
 import { useApi, mensajeError } from "../lib/useApi";
@@ -14,7 +15,7 @@ const ROLES: Record<Rol, { etiqueta: string; color: string; descripcion: string 
   TERRENO: { etiqueta: "Terreno", color: "#2B8A3E", descripcion: "Atiende las tareas que le asignan" },
 };
 
-type Pestana = "PERSONAL" | "DEPARTAMENTOS" | "VECINOS";
+type Pestana = "PERSONAL" | "DEPARTAMENTOS" | "VECINOS" | "SOLICITUDES" | "AUDITORIA";
 
 export default function AdminPanel({ tickets, ahora, miId }: { tickets: Ticket[]; ahora: number; miId?: string }) {
   const api = useApi();
@@ -29,6 +30,8 @@ export default function AdminPanel({ tickets, ahora, miId }: { tickets: Ticket[]
   const [form, setForm] = useState({ nombre: "", rol: "OPERADOR" as Rol, departamentoId: "" as string });
   const [guardando, setGuardando] = useState(false);
   const [bloqueando, setBloqueando] = useState<Ciudadano | null>(null);
+  const [anonimizando, setAnonimizando] = useState<Ciudadano | null>(null);
+  const [motivoAnonimizar, setMotivoAnonimizar] = useState("");
 
   const cargarOperadores = useCallback(async () => {
     const res = await api("/operadores");
@@ -64,6 +67,20 @@ export default function AdminPanel({ tickets, ahora, miId }: { tickets: Ticket[]
       cargarOperadores();
     } else {
       avisar({ titulo: "No se guardó", mensaje: res.status === 404 ? "Falta crear la ruta PUT /operadores/{id} en API Gateway." : await mensajeError(res), tipo: "error" });
+    }
+  };
+
+  const anonimizar = async () => {
+    if (!anonimizando) return;
+    const res = await api(`/ciudadanos/${anonimizando.id}`, { method: "PUT", body: JSON.stringify({ anonimizar: true, motivo: motivoAnonimizar }) });
+    if (res.ok) {
+      const r = await res.json();
+      avisar({ titulo: "Vecino anonimizado", mensaje: `${r.reportes} reportes y ${r.fotos} fotos depurados`, tipo: "ok" });
+      setAnonimizando(null);
+      setMotivoAnonimizar("");
+      cargarCiudadanos();
+    } else {
+      avisar({ titulo: "No se pudo anonimizar", mensaje: await mensajeError(res), tipo: "error" });
     }
   };
 
@@ -109,7 +126,10 @@ export default function AdminPanel({ tickets, ahora, miId }: { tickets: Ticket[]
     { id: "PERSONAL", etiqueta: "Personal", icono: <FiUsers size={14} />, n: operadores?.length },
     { id: "DEPARTAMENTOS", etiqueta: "Departamentos", icono: <FiGrid size={14} />, n: DEPARTAMENTOS.length },
     { id: "VECINOS", etiqueta: "Vecinos", icono: <FiShield size={14} />, n: ciudadanos?.length },
+    { id: "SOLICITUDES", etiqueta: "Datos personales", icono: <FiFileText size={14} /> },
+    { id: "AUDITORIA", etiqueta: "Auditoría", icono: <FiList size={14} /> },
   ];
+  const conBuscador = pestana === "PERSONAL" || pestana === "VECINOS";
 
   return (
     <div className="panel" style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
@@ -122,13 +142,13 @@ export default function AdminPanel({ tickets, ahora, miId }: { tickets: Ticket[]
           ))}
         </div>
         <div className="fila">
-          {pestana !== "DEPARTAMENTOS" && (
+          {conBuscador && (
             <div className="input-con-icono" style={{ width: 240 }}>
               <FiSearch size={14} />
               <input className="input" style={{ height: 32 }} placeholder={pestana === "VECINOS" ? "Buscar teléfono" : "Buscar nombre, correo o área"} value={busqueda} onChange={e => setBusqueda(e.target.value)} />
             </div>
           )}
-          <button className="btn-icono" onClick={() => (pestana === "VECINOS" ? cargarCiudadanos() : cargarOperadores())} title="Actualizar"><FiRefreshCw size={14} /></button>
+          {conBuscador && <button className="btn-icono" onClick={() => (pestana === "VECINOS" ? cargarCiudadanos() : cargarOperadores())} title="Actualizar"><FiRefreshCw size={14} /></button>}
         </div>
       </div>
 
@@ -223,6 +243,9 @@ export default function AdminPanel({ tickets, ahora, miId }: { tickets: Ticket[]
           </div>
         )}
 
+        {pestana === "SOLICITUDES" && <SolicitudesDatos ahora={ahora} />}
+        {pestana === "AUDITORIA" && <Auditoria />}
+
         {/* ================= VECINOS ================= */}
         {pestana === "VECINOS" && (
           errorCiudadanos ? <Vacio titulo="No se pudo cargar la lista" texto={errorCiudadanos} /> :
@@ -237,7 +260,7 @@ export default function AdminPanel({ tickets, ahora, miId }: { tickets: Ticket[]
               <tbody>
                 {vecinos.map((c, i) => (
                   <tr key={c.id} className="anim-arriba" style={{ ["--i" as any]: Math.min(i, 15), background: c.baneado ? "var(--peligro-suave)" : undefined }}>
-                    <td className="mono" style={{ padding: "10px 12px", borderBottom: "1px solid var(--borde)", fontWeight: 600 }}>{formatearTelefono(c.telefono)}</td>
+                    <td className="mono" style={{ padding: "10px 12px", borderBottom: "1px solid var(--borde)", fontWeight: 600 }}>{c.telefono.startsWith("anonimo-") ? <span className="texto-3">Anónimo</span> : formatearTelefono(c.telefono)}</td>
                     <td className="mono" style={{ padding: "10px 12px", borderBottom: "1px solid var(--borde)" }}>{c._count?.reportes ?? 0}</td>
                     <td style={{ padding: "10px 12px", borderBottom: "1px solid var(--borde)" }}>
                       {c.reportes?.[0] ? <span>{tiempoRelativo(c.reportes[0].createdAt, ahora)} <span className="texto-3">| {ESTADOS[c.reportes[0].estado]?.etiqueta}</span></span> : <span className="texto-3">--</span>}
@@ -247,9 +270,14 @@ export default function AdminPanel({ tickets, ahora, miId }: { tickets: Ticket[]
                       <span className="insignia" style={{ color: c.baneado ? "var(--peligro)" : "var(--ok)" }}>{c.baneado ? "Bloqueado" : "Habilitado"}</span>
                     </td>
                     <td style={{ padding: "10px 12px", borderBottom: "1px solid var(--borde)", textAlign: "right" }}>
-                      <button className={`btn btn-sm ${c.baneado ? "btn-secundario" : "btn-peligro-borde"}`} onClick={() => setBloqueando(c)}>
-                        {c.baneado ? <><FiUnlock size={12} /> Desbloquear</> : <><FiLock size={12} /> Bloquear</>}
-                      </button>
+                      {!c.telefono.startsWith("anonimo-") && (
+                        <div className="fila" style={{ gap: 6, justifyContent: "flex-end" }}>
+                          <button className={`btn btn-sm ${c.baneado ? "btn-secundario" : "btn-peligro-borde"}`} onClick={() => setBloqueando(c)}>
+                            {c.baneado ? <><FiUnlock size={12} /> Desbloquear</> : <><FiLock size={12} /> Bloquear</>}
+                          </button>
+                          <button className="btn btn-sm btn-fantasma" onClick={() => { setMotivoAnonimizar(""); setAnonimizando(c); }} title="Eliminar sus datos personales"><FiUserX size={12} /> Anonimizar</button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -258,6 +286,22 @@ export default function AdminPanel({ tickets, ahora, miId }: { tickets: Ticket[]
           )
         )}
       </div>
+
+      {/* Anonimización (derecho de supresión) */}
+      <Modal abierto={!!anonimizando} titulo="Anonimizar vecino" subtitulo={formatearTelefono(anonimizando?.telefono)} onCerrar={() => setAnonimizando(null)}
+        pie={<>
+          <button className="btn btn-fantasma" onClick={() => setAnonimizando(null)}>Cancelar</button>
+          <button className="btn btn-peligro" onClick={anonimizar} disabled={motivoAnonimizar.trim().length < 5}>Anonimizar definitivamente</button>
+        </>}>
+        <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>
+          Se reemplaza el número por un código anónimo y se borran los relatos y las fotos de sus <strong>{anonimizando?._count?.reportes ?? 0} reportes</strong>.
+          Los reportes quedan solo para estadística y el vecino ya no recibirá avisos. <strong>No se puede deshacer.</strong>
+        </p>
+        <p className="texto-3" style={{ margin: 0, fontSize: 12 }}>Si el vecino lo pidió por WhatsApp, usa mejor la pestaña Datos personales: ahí se le responde y queda registrada la solicitud.</p>
+        <label className="campo"><span className="rotulo">Motivo (queda en la auditoría)</span>
+          <input className="input" value={motivoAnonimizar} onChange={e => setMotivoAnonimizar(e.target.value)} placeholder="Ej: solicitud por correo del 04-11-2026" />
+        </label>
+      </Modal>
 
       {/* Modal de edición */}
       <Modal abierto={!!editando} titulo="Editar integrante" subtitulo={editando?.email} onCerrar={() => setEditando(null)}

@@ -2,6 +2,7 @@
 import { FiX, FiCpu, FiMapPin, FiUser, FiMessageSquare, FiImage, FiClock, FiCopy, FiExternalLink, FiLayers, FiStar } from "react-icons/fi";
 import type { Ticket } from "../lib/tipos";
 import { ESTADOS, categoriaInfo, departamentoInfo, formatearTelefono, prioridadDe, tiempoRelativo, calificacionDe, fechaHora } from "../lib/constantes";
+import { esFotoCierre } from "../lib/constantes";
 import { unidadVecinalDe, enlaceGoogleMaps } from "../lib/geo";
 import { InsigniaEstado, InsigniaPrioridad, IndicadorSla, Conversacion, Galeria, LineaTiempo, Seccion, EtiquetaCategoria } from "./ui/Comunes";
 import { useAvisos } from "./ui/Avisos";
@@ -15,9 +16,13 @@ interface Props {
   onVerCercano?: (id: string) => void;
   mostrarCiudadano?: boolean;
   cargando?: boolean;
+  onMensaje?: () => void;
+  onDuplicado?: (codigoOriginal: string) => void;
 }
 
-export default function DetalleTicket({ ticket: t, ahora, onCerrar, acciones, cercanos = [], onVerCercano, mostrarCiudadano = true, cargando }: Props) {
+export default function DetalleTicket({ ticket: t, ahora, onCerrar, acciones, cercanos = [], onVerCercano, mostrarCiudadano = true, cargando, onMensaje, onDuplicado }: Props) {
+  const fotosVecino = (t.evidencias || []).filter(e => !esFotoCierre(e.url));
+  const fotosCierre = (t.evidencias || []).filter(e => esFotoCierre(e.url));
   const avisar = useAvisos();
   const cat = categoriaInfo(t.categoria?.nombre);
   const depto = departamentoInfo(t.departamentoId ?? t.departamento?.nombre);
@@ -125,9 +130,11 @@ export default function DetalleTicket({ ticket: t, ahora, onCerrar, acciones, ce
                   {t.ciudadano.baneado && <span style={{ color: "var(--peligro)", fontWeight: 600 }}> | Bloqueado</span>}
                 </div>
               </div>
-              <a className="btn btn-sm btn-secundario" href={`https://wa.me/${String(t.ciudadano.telefono).replace(/\D/g, "")}`} target="_blank" rel="noreferrer">
-                <FiMessageSquare size={12} /> WhatsApp
-              </a>
+              {onMensaje && !String(t.ciudadano.telefono).startsWith("Anónimo") && (
+                <button className="btn btn-sm btn-secundario" onClick={onMensaje} title="Enviar un mensaje por WhatsApp desde el número municipal">
+                  <FiMessageSquare size={12} /> Escribir
+                </button>
+              )}
             </div>
           </Seccion>
         )}
@@ -138,9 +145,14 @@ export default function DetalleTicket({ ticket: t, ahora, onCerrar, acciones, ce
         </Seccion>
 
         {/* Evidencias */}
-        <Seccion titulo={`Evidencia fotográfica (${t.evidencias?.length || 0})`} icono={<FiImage size={12} />}>
-          <Galeria evidencias={t.evidencias} />
+        <Seccion titulo={`Fotos del vecino (${fotosVecino.length})`} icono={<FiImage size={12} />}>
+          <Galeria evidencias={fotosVecino} />
         </Seccion>
+        {fotosCierre.length > 0 && (
+          <Seccion titulo={`Fotos del cierre (${fotosCierre.length})`} icono={<FiImage size={12} />}>
+            <Galeria evidencias={fotosCierre} />
+          </Seccion>
+        )}
 
         {/* Posibles duplicados */}
         {cercanos.length > 0 && (
@@ -150,17 +162,21 @@ export default function DetalleTicket({ ticket: t, ahora, onCerrar, acciones, ce
             </div>
             <div className="columna" style={{ gap: 4 }}>
               {cercanos.slice(0, 6).map((c, i) => (
-                <button key={c.id} className="item-lista anim-arriba" onClick={() => onVerCercano?.(c.id)}
-                  style={{ ["--i" as any]: i, ["--color-item" as any]: categoriaInfo(c.categoria?.nombre).color, padding: "8px 10px 8px 14px" }}>
-                  <div className="fila entre">
-                    <span className="mono" style={{ fontWeight: 600, fontSize: 12 }}>{c.codigoTicket}</span>
-                    <span className="mono texto-3" style={{ fontSize: 11 }}>{c.distancia} m</span>
-                  </div>
-                  <div className="fila entre" style={{ marginTop: 2 }}>
-                    <span className="texto-2 truncar" style={{ fontSize: 11.5 }}>{c.categoria?.nombre || "Sin clasificar"}</span>
-                    <span style={{ fontSize: 10.5, color: ESTADOS[c.estado]?.color, fontWeight: 600 }}>{ESTADOS[c.estado]?.etiqueta}</span>
-                  </div>
-                </button>
+                <div key={c.id} className="item-lista anim-arriba fila" style={{ ["--i" as any]: i, ["--color-item" as any]: categoriaInfo(c.categoria?.nombre).color, padding: "8px 10px 8px 14px", gap: 8 }}>
+                  <button onClick={() => onVerCercano?.(c.id)} className="crece" style={{ background: "none", border: 0, padding: 0, textAlign: "left" }} title="Abrir este reporte">
+                    <div className="fila entre">
+                      <span className="mono" style={{ fontWeight: 600, fontSize: 12 }}>{c.codigoTicket}</span>
+                      <span className="mono texto-3" style={{ fontSize: 11 }}>{c.distancia} m</span>
+                    </div>
+                    <div className="fila entre" style={{ marginTop: 2 }}>
+                      <span className="texto-2 truncar" style={{ fontSize: 11.5 }}>{c.categoria?.nombre || "Sin clasificar"}</span>
+                      <span style={{ fontSize: 10.5, color: ESTADOS[c.estado]?.color, fontWeight: 600 }}>{ESTADOS[c.estado]?.etiqueta}</span>
+                    </div>
+                  </button>
+                  {onDuplicado && !["RESUELTO", "DESCARTADO"].includes(t.estado) && c.estado !== "DESCARTADO" && (
+                    <button className="btn btn-sm btn-secundario" onClick={() => onDuplicado(c.codigoTicket)} title={`Cerrar este reporte como duplicado de ${c.codigoTicket} y avisar al vecino`}>Es el mismo</button>
+                  )}
+                </div>
               ))}
             </div>
           </Seccion>

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { FiX, FiMapPin, FiImage, FiList, FiChevronLeft, FiChevronRight } from "react-icons/fi";
 import {
   ESTADOS, PRIORIDADES, categoriaInfo, slaDe, duracion, leerConversacion, fechaHora,
-  esNotaInterna, esCalificacion, esRechazo,
+  esNotaInterna, esCalificacion, esRechazo, esMensajeVecino,
 } from "../../lib/constantes";
 import type { Estado, Prioridad, Ticket, Historial, Evidencia } from "../../lib/tipos";
 import { useCuentaAnimada } from "../../lib/hooks";
@@ -277,9 +277,10 @@ export function LineaTiempo({ historial, creado }: { historial?: Historial[]; cr
         const nota = esNotaInterna(h);
         const calif = esCalificacion(h);
         const rechazo = esRechazo(h);
-        const color = calif ? "#C08A00" : rechazo ? "var(--peligro)" : nota ? "var(--texto-3)" : ESTADOS[h.estadoNuevo]?.color;
-        const titulo = calif ? "Evaluación del vecino" : rechazo ? "Rechazado por funcionario" : nota ? "Nota interna" : ESTADOS[h.estadoNuevo]?.etiqueta || h.estadoNuevo;
-        const comentario = String(h.comentario || "").replace(/^\[Nota interna\]\s*/, "").replace(/^Rechazado por funcionario:\s*/, "Motivo: ");
+        const mensaje = esMensajeVecino(h);
+        const color = calif ? "#C08A00" : rechazo ? "var(--peligro)" : mensaje ? "#0C8A68" : nota ? "var(--texto-3)" : ESTADOS[h.estadoNuevo]?.color;
+        const titulo = calif ? "Evaluación del vecino" : rechazo ? "Rechazado por funcionario" : mensaje ? "Mensaje enviado al vecino" : nota ? "Nota interna" : ESTADOS[h.estadoNuevo]?.etiqueta || h.estadoNuevo;
+        const comentario = String(h.comentario || "").replace(/^\[Nota interna\]\s*/, "").replace(/^\[Mensaje al vecino\]\s*/, "").replace(/^Rechazado por funcionario:\s*/, "Motivo: ");
         return (
           <div key={h.id} className={`hito anim-arriba${i === 0 ? " actual" : ""}`} style={{ ["--color-hito" as any]: color, ["--i" as any]: i }}>
             <div className="fila entre" style={{ alignItems: "baseline" }}>

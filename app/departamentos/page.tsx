@@ -6,6 +6,7 @@ import { signOut } from "next-auth/react";
 import { FiBell, FiLogOut, FiSearch, FiUserCheck, FiCheck, FiNavigation, FiEdit3, FiSlash, FiInbox, FiUsers, FiX, FiAlertTriangle, FiStar } from "react-icons/fi";
 
 import DetalleTicket from "../../components/DetalleTicket";
+import MensajeVecino from "../../components/MensajeVecino";
 import { Logo, PantallaCarga, IndicadorConexion, InsigniaEstado, IndicadorSla, Esqueleto, Vacio, Modal, Kpi } from "../../components/ui/Comunes";
 import { Icono } from "../../components/ui/Iconos";
 import { useAvisos } from "../../components/ui/Avisos";
@@ -53,6 +54,7 @@ export default function ConsolaDepartamento() {
   const [panelAlertas, setPanelAlertas] = useState(false);
   const [alertasVistas, setAlertasVistas] = usePreferencia<string[]>("munivox_alertas_vistas", []);
   const [modal, setModal] = useState<null | "DESCARTAR" | "NOTA">(null);
+  const [mensajeAbierto, setMensajeAbierto] = useState(false);
   const [textoModal, setTextoModal] = useState("");
   const seleccionRef = useRef<string | null>(null);
   const conocidos = useRef<Set<string> | null>(null);
@@ -344,6 +346,7 @@ export default function ConsolaDepartamento() {
                 ahora={ahora}
                 onCerrar={cerrarDetalle}
                 cargando={cargandoDetalle}
+                onMensaje={() => setMensajeAbierto(true)}
                 acciones={
                   cerrado ? (
                     <button className="btn btn-secundario btn-sm btn-bloque" onClick={() => { setTextoModal(""); setModal("NOTA"); }}><FiEdit3 size={12} /> Nota interna</button>
@@ -461,6 +464,9 @@ export default function ConsolaDepartamento() {
           </div>
         </div>
       </div>
+
+      <MensajeVecino ticket={detalle} abierto={mensajeAbierto} onCerrar={() => setMensajeAbierto(false)}
+        onEnviado={t => { setDetalle(t); avisarCambio({ id: t.id, tipo: "mensaje", departamentoId: t.departamentoId ?? undefined }); }} />
 
       <Modal abierto={!!modal} onCerrar={() => setModal(null)} titulo={modal === "DESCARTAR" ? "Descartar reporte" : "Agregar nota interna"} subtitulo={detalle?.codigoTicket}
         pie={<>

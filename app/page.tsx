@@ -5,8 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { signOut } from "next-auth/react";
 import {
   FiMap, FiColumns, FiBarChart2, FiSettings, FiLogOut, FiSearch, FiVolume2, FiVolumeX, FiSend,
-  FiEdit3, FiSlash, FiRotateCcw, FiInbox, FiAlertTriangle, FiCpu,
+  FiEdit3, FiSlash, FiRotateCcw, FiInbox, FiAlertTriangle, FiCpu, FiBell, FiX, FiLink,
 } from "react-icons/fi";
+import MensajeVecino from "../components/MensajeVecino";
 
 import Kanban from "../components/Kanban";
 import Estadisticas from "../components/Estadisticas";
@@ -24,6 +25,7 @@ import type { Ticket, Prioridad, Estado } from "../lib/tipos";
 import {
   ESTADOS, PRIORIDADES, ORDEN_PRIORIDADES, DEPARTAMENTOS, CATEGORIAS, ESTADOS_ACTIVOS, ORDEN_ESTADOS,
   categoriaInfo, departamentoInfo, prioridadDe, slaDe, tiempoRelativo, normalizar, resumenDescripcion, formatearTelefono,
+  esRechazo, esCalificacion, duracion,
 } from "../lib/constantes";
 
 const Mapa = dynamic(() => import("../components/Map"), {
@@ -66,6 +68,10 @@ export default function CentralC4() {
   const [deptoDestino, setDeptoDestino] = useState<number | "">("");
   const [procesando, setProcesando] = useState(false);
   const [modal, setModal] = useState<null | "DESCARTAR" | "NOTA" | "REABRIR">(null);
+  const [mensajeAbierto, setMensajeAbierto] = useState(false);
+  const [duplicadoDe, setDuplicadoDe] = useState<string | null>(null);
+  const [panelAlertas, setPanelAlertas] = useState(false);
+  const [alertasVistas, setAlertasVistas] = usePreferencia<string[]>("munivox_alertas_c4", []);
   const [textoModal, setTextoModal] = useState("");
 
   const [nuevos, setNuevos] = useState<Set<string>>(new Set());
@@ -209,6 +215,43 @@ export default function CentralC4() {
     if (ok) { setModal(null); setTextoModal(""); }
   };
 
+  const unirDuplicado = async () => {
+    if (!duplicadoDe) return;
+    const ok = await actualizar({ duplicadoDe }, `Unido a ${duplicadoDe}`);
+    if (ok) { setDuplicadoDe(null); cerrarDetalle(); }
+  };
+
+  // --------------------------------------------------------------------------
+  // CENTRO DE ALERTAS: casos que requieren atención de la central
+  // --------------------------------------------------------------------------
+  const alertas = useMemo(() => {
+    if (!ahora) return [];
+    const lista: { id: string; ticketId: string; codigo: string; titulo: string; detalle: string; color: string; peso: number }[] = [];
+    tickets.forEach(t => {
+      const edad = ahora - new Date(t.createdAt).getTime();
+      const prio = prioridadDe(t);
+      const ultimo = t.historial?.[0];
+      if (t.estado === "PENDIENTE" && (prio === "CRITICA" || prio === "ALTA") && edad > 30 * 60000)
+        lista.push({ id: `urg-${t.id}`, ticketId: t.id, codigo: t.codigoTicket, titulo: `Prioridad ${PRIORIDADES[prio].etiqueta.toLowerCase()} sin derivar`, detalle: `Ingresó ${tiempoRelativo(t.createdAt, ahora)}`, color: "var(--peligro)", peso: 5 });
+      else if (t.estado === "PENDIENTE" && edad > 2 * 3600000)
+        lista.push({ id: `pend-${t.id}`, ticketId: t.id, codigo: t.codigoTicket, titulo: "Sin derivar hace más de 2 horas", detalle: categoriaInfo(t.categoria?.nombre).nombre, color: "var(--alerta)", peso: 3 });
+      if (ESTADOS_ACTIVOS.includes(t.estado) && !t.categoria)
+        lista.push({ id: `cat-${t.id}`, ticketId: t.id, codigo: t.codigoTicket, titulo: "Sin categoría", detalle: "La IA no la reconoció: asígnala en el expediente", color: "var(--alerta)", peso: 2 });
+      if (t.estado === "EN_REVISION" && !t.operadorAsignadoId && ultimo && esRechazo(ultimo))
+        lista.push({ id: `rech-${ultimo.id}`, ticketId: t.id, codigo: t.codigoTicket, titulo: "Rechazado en terreno, sin reasignar", detalle: String(ultimo.comentario).replace(/^Rechazado por funcionario:\s*/, ""), color: "var(--peligro)", peso: 4 });
+      if (ESTADOS_ACTIVOS.includes(t.estado) && slaDe(t, ahora).vencido && prio !== "BAJA")
+        lista.push({ id: `sla-${t.id}`, ticketId: t.id, codigo: t.codigoTicket, titulo: "Fuera de plazo", detalle: `Atrasado ${duracion(slaDe(t, ahora).restanteMs)}`, color: "var(--peligro)", peso: 3 });
+      (t.historial || []).forEach(h => {
+        if (esCalificacion(h) && /1\/5/.test(String(h.comentario)) && ahora - new Date(h.createdAt).getTime() < 7 * 86400000)
+          lista.push({ id: `recl-${h.id}`, ticketId: t.id, codigo: t.codigoTicket, titulo: "El vecino dice que no se resolvió", detalle: "Revisa el caso y evalúa reabrirlo", color: "#C08A00", peso: 4 });
+        if (String(h.comentario || "").startsWith("[Nota interna] El vecino respondió") && ahora - new Date(h.createdAt).getTime() < 48 * 3600000)
+          lista.push({ id: `resp-${h.id}`, ticketId: t.id, codigo: t.codigoTicket, titulo: "El vecino respondió tu mensaje", detalle: tiempoRelativo(h.createdAt, ahora), color: "#0C8A68", peso: 3 });
+      });
+    });
+    return lista.sort((a, b) => b.peso - a.peso);
+  }, [tickets, ahora]);
+  const alertasNuevas = alertas.filter(a => !alertasVistas.includes(a.id)).length;
+
   // --------------------------------------------------------------------------
   // FILTROS Y MÉTRICAS
   // --------------------------------------------------------------------------
@@ -351,6 +394,35 @@ export default function CentralC4() {
           </div>
           <div className="fila" style={{ gap: 16 }}>
             <IndicadorConexion conectado={conectado} />
+            <div style={{ position: "relative" }}>
+              <button className="btn-icono" onClick={() => setPanelAlertas(!panelAlertas)} title="Casos que requieren atención" style={{ position: "relative", ...(panelAlertas ? { borderColor: "var(--texto)" } : {}) }}>
+                <FiBell size={15} style={{ animation: alertasNuevas ? "sacudir 0.6s ease 2" : undefined }} />
+                {alertas.length > 0 && (
+                  <span className="mono" style={{ position: "absolute", top: -7, right: -7, minWidth: 18, height: 18, padding: "0 4px", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 600, color: "#fff", background: alertasNuevas ? "var(--peligro)" : "var(--texto-3)" }}>{alertas.length}</span>
+                )}
+              </button>
+              {panelAlertas && (
+                <div className="anim-escalar" style={{ position: "absolute", right: 0, top: 42, width: 400, maxHeight: 480, overflow: "auto", background: "var(--superficie)", border: "1px solid var(--borde)", boxShadow: "var(--sombra-3)", zIndex: 60 }}>
+                  <div className="fila entre" style={{ padding: "10px 12px", borderBottom: "1px solid var(--borde)", position: "sticky", top: 0, background: "var(--superficie)" }}>
+                    <span className="titulo-3">Requieren atención ({alertas.length})</span>
+                    <div className="fila" style={{ gap: 4 }}>
+                      {alertasNuevas > 0 && <button className="btn btn-fantasma btn-sm" onClick={() => setAlertasVistas(alertas.map(a => a.id))}>Marcar vistas</button>}
+                      <button className="btn-icono" style={{ width: 28, height: 28 }} onClick={() => setPanelAlertas(false)}><FiX size={14} /></button>
+                    </div>
+                  </div>
+                  {alertas.length === 0 ? <div className="texto-3" style={{ padding: 16 }}>Todo en orden: no hay casos que requieran atención.</div> : alertas.slice(0, 60).map((a, i) => (
+                    <button key={a.id} className="anim-arriba" onClick={() => { setVista("OPERACIONES"); seleccionar(a.ticketId); setPanelAlertas(false); setAlertasVistas([...new Set([...alertasVistas, a.id])]); }}
+                      style={{ ["--i" as any]: Math.min(i, 10), display: "block", width: "100%", textAlign: "left", padding: "9px 12px", border: 0, borderBottom: "1px solid var(--borde)", borderLeft: `3px solid ${a.color}`, background: alertasVistas.includes(a.id) ? "var(--superficie)" : "var(--superficie-2)" }}>
+                      <div className="fila entre">
+                        <span style={{ fontWeight: 600, fontSize: 12.5, color: a.color }}>{a.titulo}</span>
+                        <span className="mono" style={{ fontSize: 11.5 }}>{a.codigo}</span>
+                      </div>
+                      <div className="texto-2 truncar" style={{ fontSize: 11.5, marginTop: 2 }}>{a.detalle}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <span className="mono texto-2 oculto-movil" style={{ fontSize: 12 }}>{new Date(ahora).toLocaleDateString("es-CL", { weekday: "short", day: "2-digit", month: "short" })} {new Date(ahora).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}</span>
             <button className="btn-icono" onClick={() => setSonido(!sonido)} title={sonido ? "Silenciar alertas" : "Activar sonido de alertas"}>
               {sonido ? <FiVolume2 size={15} /> : <FiVolumeX size={15} />}
@@ -400,6 +472,8 @@ export default function CentralC4() {
                       cargando={cargandoDetalle}
                       cercanos={cercanos}
                       onVerCercano={seleccionar}
+                      onMensaje={() => setMensajeAbierto(true)}
+                      onDuplicado={codigo => setDuplicadoDe(codigo)}
                       acciones={
                         <div className="columna" style={{ gap: 10 }}>
                           {!cerrado ? (
@@ -572,6 +646,19 @@ export default function CentralC4() {
       </main>
 
       {/* =================== MODALES =================== */}
+      <MensajeVecino ticket={detalle} abierto={mensajeAbierto} onCerrar={() => setMensajeAbierto(false)}
+        onEnviado={t => { setDetalle(prev => (prev ? { ...prev, ...t } : t)); avisarCambio({ id: t.id, tipo: "mensaje", departamentoId: t.departamentoId ?? undefined }); }} />
+
+      <Modal abierto={!!duplicadoDe} onCerrar={() => setDuplicadoDe(null)} titulo="Unir como duplicado" subtitulo={`${detalle?.codigoTicket} es el mismo problema que ${duplicadoDe}`}
+        pie={<>
+          <button className="btn btn-fantasma" onClick={() => setDuplicadoDe(null)}>Cancelar</button>
+          <button className="btn btn-primario" onClick={unirDuplicado} disabled={procesando}><FiLink size={13} /> Unir y avisar al vecino</button>
+        </>}>
+        <p style={{ margin: 0, lineHeight: 1.6 }}>
+          El reporte <strong className="mono">{detalle?.codigoTicket}</strong> se cerrará como duplicado de <strong className="mono">{duplicadoDe}</strong>.
+          El vecino recibirá un aviso con el enlace para seguir el caso original, que continúa su atención normal.
+        </p>
+      </Modal>
       <Modal
         abierto={!!modal}
         onCerrar={() => setModal(null)}

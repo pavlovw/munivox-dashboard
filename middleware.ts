@@ -6,10 +6,10 @@ export default withAuth({
   },
 });
 
-// Protegemos la raíz (el dashboard) y dejamos libre la API de autenticación y recursos estáticos
+// Protegemos el panel; quedan públicas el login, el seguimiento del vecino y la política de privacidad
 export const config = {
   matcher: [
     "/",
-    "/((?!api/webhook|login|_next/static|_next/image|favicon.ico|.*\\.svg).*)",
+    "/((?!api/webhook|login|seguimiento|privacidad|_next/static|_next/image|favicon.ico|.*\\.svg).*)",
   ],
 };

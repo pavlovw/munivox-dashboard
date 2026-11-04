@@ -122,6 +122,7 @@ export default function Login() {
 
         <div className="texto-3 anim-aparecer" style={{ marginTop: 40, paddingTop: 18, borderTop: "1px solid var(--borde)", fontSize: 11.5, lineHeight: 1.6, animationDelay: "400ms" }}>
           Para crear una cuenta o recuperar el acceso, comunícate con la Dirección de Informática de la Municipalidad de Buin.
+          <div style={{ marginTop: 10 }}><a href="/privacidad">Política de privacidad</a> | <a href="/seguimiento">Vecinos: revisar un reporte</a></div>
         </div>
       </div>
     </div>

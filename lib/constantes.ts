@@ -154,6 +154,8 @@ export function slaDe(t: Ticket, ahora = Date.now()) {
 export const esNotaInterna = (h: Historial) => String(h.comentario || "").startsWith("[Nota interna]");
 export const esCalificacion = (h: Historial) => String(h.comentario || "").startsWith("Calificación del ciudadano");
 export const esRechazo = (h: Historial) => String(h.comentario || "").startsWith("Rechazado por funcionario");
+export const esMensajeVecino = (h: Historial) => String(h.comentario || "").startsWith("[Mensaje al vecino]");
+export const esFotoCierre = (url: string) => url.includes("/cierre/");
 
 /** Nota del ciudadano (1, 3 o 5) si respondió la encuesta de cierre */
 export function calificacionDe(t: Ticket): number | null {

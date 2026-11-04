@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { signOut } from "next-auth/react";
-import { FiLogOut, FiArrowLeft, FiNavigation, FiMap, FiCheck, FiX, FiCrosshair, FiInbox, FiCpu, FiImage, FiMessageSquare, FiClock, FiAlertTriangle } from "react-icons/fi";
+import { FiLogOut, FiArrowLeft, FiNavigation, FiMap, FiCheck, FiX, FiCrosshair, FiInbox, FiCpu, FiImage, FiMessageSquare, FiClock, FiAlertTriangle, FiCamera } from "react-icons/fi";
 
 import { Logo, PantallaCarga, IndicadorConexion, IndicadorSla, InsigniaPrioridad, Conversacion, Galeria, LineaTiempo, Seccion, Esqueleto, Vacio, Modal } from "../../components/ui/Comunes";
 import { Icono } from "../../components/ui/Iconos";
@@ -43,6 +43,9 @@ export default function AppTerreno() {
   const [procesando, setProcesando] = useState(false);
   const [modal, setModal] = useState<null | "ACEPTAR" | "RECHAZAR" | "RESOLVER">(null);
   const [textoModal, setTextoModal] = useState("");
+  const [fotoCierre, setFotoCierre] = useState<string | null>(null);
+  const [preparandoFoto, setPreparandoFoto] = useState(false);
+  const [ordenCercania, setOrdenCercania] = useState(false);
 
   const [gpsActivo, setGpsActivo] = useState(false);
   const [posicion, setPosicion] = useState<{ lat: number; lng: number; precision: number } | null>(null);
@@ -165,6 +168,8 @@ export default function AppTerreno() {
         avisar({ titulo: "No se pudo completar", mensaje: await mensajeError(res), tipo: "error" });
         return false;
       }
+      const respuesta = await res.json().catch(() => ({}));
+      if (respuesta?.advertencia) avisar({ titulo: "Atención", mensaje: respuesta.advertencia, tipo: "alerta", duracion: 8000 });
       avisar({ titulo: exito, mensaje: activo.codigoTicket, tipo: "ok" });
       try { navigator.vibrate?.(60); } catch {}
       avisarCambio({ id: activo.id, tipo: "terreno", departamentoId: activo.departamentoId ?? undefined });
@@ -190,10 +195,32 @@ export default function AppTerreno() {
       if (ok) setActivoId(null);
     }
     if (modal === "RESOLVER") {
-      ok = await actualizar({ nuevoEstado: "RESUELTO", comentario: texto }, "Caso cerrado");
-      if (ok) { setActivoId(null); setGrupo("CERRADAS"); }
+      ok = await actualizar({ nuevoEstado: "RESUELTO", comentario: texto, ...(fotoCierre && { fotoCierre }) }, "Caso cerrado");
+      if (ok) { setActivoId(null); setGrupo("CERRADAS"); setFotoCierre(null); }
     }
     if (ok) { setModal(null); setTextoModal(""); }
+  };
+
+  // Reduce la foto antes de enviarla (máximo 1280 px, JPEG): sube rápido con poca señal
+  const prepararFoto = async (archivo?: File) => {
+    if (!archivo) return;
+    setPreparandoFoto(true);
+    try {
+      const url = URL.createObjectURL(archivo);
+      const img = new Image();
+      await new Promise((ok, falla) => { img.onload = ok; img.onerror = falla; img.src = url; });
+      const escala = Math.min(1, 1280 / Math.max(img.width, img.height));
+      const lienzo = document.createElement("canvas");
+      lienzo.width = Math.round(img.width * escala);
+      lienzo.height = Math.round(img.height * escala);
+      lienzo.getContext("2d")!.drawImage(img, 0, 0, lienzo.width, lienzo.height);
+      URL.revokeObjectURL(url);
+      setFotoCierre(lienzo.toDataURL("image/jpeg", 0.72));
+    } catch {
+      avisar({ titulo: "No se pudo leer la foto", tipo: "error" });
+    } finally {
+      setPreparandoFoto(false);
+    }
   };
 
   const distanciaA = (t: Ticket) => posicion && t.latitud != null ? distanciaKm(posicion.lat, posicion.lng, t.latitud, t.longitud!) : null;
@@ -316,6 +343,22 @@ export default function AppTerreno() {
                 {FRASES_CIERRE.map(f => <button key={f} className="btn btn-sm btn-secundario" onClick={() => setTextoModal(f)}>{f}</button>)}
               </div>
               <textarea className="textarea" autoFocus value={textoModal} onChange={e => setTextoModal(e.target.value)} placeholder="Informe de cierre" maxLength={500} />
+              <div className="campo">
+                <span className="rotulo">Foto del trabajo terminado (opcional)</span>
+                {fotoCierre ? (
+                  <div style={{ position: "relative", border: "1px solid var(--borde)" }} className="anim-escalar">
+                    <img src={fotoCierre} alt="Vista previa de la foto de cierre" style={{ width: "100%", maxHeight: 220, objectFit: "cover" }} />
+                    <button className="btn btn-sm btn-secundario" style={{ position: "absolute", top: 8, right: 8 }} onClick={() => setFotoCierre(null)}><FiX size={12} /> Quitar</button>
+                  </div>
+                ) : (
+                  <label className="btn btn-secundario btn-lg" style={{ cursor: "pointer" }}>
+                    {preparandoFoto ? <span className="girador" style={{ width: 14, height: 14 }} /> : <FiCamera size={16} />}
+                    {preparandoFoto ? "Preparando foto" : "Tomar o elegir foto"}
+                    <input type="file" accept="image/*" capture="environment" hidden onChange={e => prepararFoto(e.target.files?.[0])} />
+                  </label>
+                )}
+                <span className="texto-3" style={{ fontSize: 11 }}>El vecino verá esta foto junto al informe. Evita que aparezcan personas o patentes.</span>
+              </div>
             </>
           )}
         </Modal>
@@ -329,7 +372,9 @@ export default function AppTerreno() {
     { id: "EN_CURSO", etiqueta: "En curso" },
     { id: "CERRADAS", etiqueta: "Cerradas" },
   ];
-  const lista = grupos[grupo];
+  const lista = ordenCercania && posicion
+    ? [...grupos[grupo]].sort((a, b) => (distanciaA(a) ?? 999) - (distanciaA(b) ?? 999))
+    : grupos[grupo];
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--fondo)" }}>
@@ -375,6 +420,13 @@ export default function AppTerreno() {
             </button>
           ))}
         </div>
+
+        {posicion && grupo !== "CERRADAS" && grupos[grupo].length > 1 && (
+          <div className="segmentos anim-aparecer" style={{ alignSelf: "flex-start" }}>
+            <button className={`segmento${!ordenCercania ? " activo" : ""}`} onClick={() => setOrdenCercania(false)}>Más urgentes</button>
+            <button className={`segmento${ordenCercania ? " activo" : ""}`} onClick={() => setOrdenCercania(true)}>Más cercanas</button>
+          </div>
+        )}
 
         {/* Tareas */}
         <div key={grupo} className="columna" style={{ gap: 8 }}>
