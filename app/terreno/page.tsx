@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { signOut } from "next-auth/react";
 import {
   FiLogOut, FiArrowLeft, FiNavigation, FiMap, FiCheck, FiX, FiCrosshair, FiInbox, FiCpu, FiImage, FiMessageSquare,
-  FiClock, FiAlertTriangle, FiCamera, FiTruck, FiWifiOff, FiUploadCloud, FiBriefcase,
+  FiClock, FiAlertTriangle, FiCamera, FiTruck, FiWifiOff, FiUploadCloud, FiBriefcase, FiBell,
 } from "react-icons/fi";
 
 import { Logo, PantallaCarga, IndicadorConexion, IndicadorSla, InsigniaPrioridad, Conversacion, Galeria, LineaTiempo, Seccion, Esqueleto, Vacio, Modal } from "../../components/ui/Comunes";
@@ -21,6 +21,7 @@ import {
   guardarLocal, leerLocal, useEnLinea, limiteDeTiempo, esErrorDeRed,
   encolar, listarPendientes, quitarPendiente, registrarServiceWorker, type AccionPendiente,
 } from "../../lib/sinConexion";
+import { estadoNotificaciones, activarNotificaciones, desactivarNotificaciones, type EstadoNotificaciones } from "../../lib/notificaciones";
 import type { Ticket, Operador } from "../../lib/tipos";
 import { PRIORIDADES, categoriaInfo, prioridadDe, slaDe, tiempoRelativo, resumenDescripcion, horaCorta } from "../../lib/constantes";
 
@@ -94,6 +95,9 @@ export default function AppTerreno() {
   const [preparandoFoto, setPreparandoFoto] = useState(false);
   const [ordenCercania, setOrdenCercania] = useState(false);
   const [mapaInteractivo, setMapaInteractivo] = useState(false);
+  const [notificaciones, setNotificaciones] = useState<EstadoNotificaciones>("cargando");
+  const [cambiandoNotif, setCambiandoNotif] = useState(false);
+  const [datosFrescos, setDatosFrescos] = useState(false); // ya se consultó al servidor (o no hay señal)
 
   const [enTurno, setEnTurno] = useState(false);
   const [gpsActivo, setGpsActivo] = useState(false);
@@ -105,7 +109,17 @@ export default function AppTerreno() {
   const claveCache = perfil ? `munivox_terreno_tareas_${perfil.id}` : null;
   const tickets = useMemo(() => aplicarPendientes(ticketsServidor, pendientes), [ticketsServidor, pendientes]);
 
-  useEffect(() => { registrarServiceWorker(); }, []);
+  useEffect(() => {
+    registrarServiceWorker();
+    estadoNotificaciones().then(setNotificaciones).catch(() => setNotificaciones("no-soportadas"));
+  }, []);
+
+  // Al tocar una notificación se abre la app en /terreno?tarea=<id>
+  const tareaPedida = useRef<string | null>(null);
+  useEffect(() => {
+    tareaPedida.current = new URLSearchParams(window.location.search).get("tarea");
+    if (tareaPedida.current) window.history.replaceState(null, "", "/terreno");
+  }, []);
 
   // --------------------------------------------------------------------------
   // TAREAS (copia local para abrir al instante y funcionar sin señal)
@@ -118,7 +132,7 @@ export default function AppTerreno() {
   }, [claveCache]);
 
   const cargar = useCallback(async () => {
-    if (!claveCache || (typeof navigator !== "undefined" && !navigator.onLine)) { setCargando(false); return; }
+    if (!claveCache || (typeof navigator !== "undefined" && !navigator.onLine)) { setCargando(false); setDatosFrescos(true); return; }
     try {
       const res = await api("/tickets", { signal: limiteDeTiempo(LIMITE_RED_MS) });
       if (res.ok) {
@@ -129,6 +143,7 @@ export default function AppTerreno() {
       }
     } catch {} finally {
       setCargando(false);
+      setDatosFrescos(true);
     }
   }, [api, claveCache]);
 
@@ -284,6 +299,34 @@ export default function AppTerreno() {
   }, [cargando]);
 
   useEffect(() => { setMapaInteractivo(false); }, [activoId]);
+
+  useEffect(() => {
+    const id = tareaPedida.current;
+    if (!id || !datosFrescos) return;
+    if (tickets.some(t => t.id === id)) setActivoId(id);
+    else avisar({ titulo: "Esa tarea ya no está a tu cargo", mensaje: "Puede haber sido reasignada o cerrada.", tipo: "info" });
+    tareaPedida.current = null;
+  }, [tickets, datosFrescos, avisar]);
+
+  const alternarNotificaciones = async () => {
+    if (cambiandoNotif) return;
+    if (!navigator.onLine) { avisar({ titulo: "Necesitas conexión para cambiar las notificaciones", tipo: "alerta" }); return; }
+    setCambiandoNotif(true);
+    try {
+      if (notificaciones === "activas") {
+        await desactivarNotificaciones(api);
+        avisar({ titulo: "Notificaciones desactivadas", tipo: "ok", duracion: 3000 });
+      } else {
+        const r = await activarNotificaciones(api);
+        avisar({ titulo: r.ok ? "Notificaciones activadas" : "No se activaron", mensaje: r.mensaje, tipo: r.ok ? "ok" : "error", duracion: 7000 });
+      }
+    } catch {
+      avisar({ titulo: "No se pudieron cambiar las notificaciones", tipo: "error" });
+    } finally {
+      setNotificaciones(await estadoNotificaciones().catch(() => "no-soportadas" as EstadoNotificaciones));
+      setCambiandoNotif(false);
+    }
+  };
 
   const activo = tickets.find(t => t.id === activoId) || null;
 
@@ -605,6 +648,25 @@ export default function AppTerreno() {
               </span>
             </span>
             <button className={`interruptor${gpsActivo ? " activo" : ""}`} onClick={() => enTurno && setGpsActivo(!gpsActivo)} disabled={!enTurno} aria-label="Compartir ubicación" style={{ width: 56, height: 30 }} />
+          </div>
+          <div className="fila entre" style={{ borderTop: "1px solid var(--borde)", padding: "10px 14px" }}>
+            <span className="fila" style={{ gap: 10, minWidth: 0 }}>
+              <FiBell size={16} color={notificaciones === "activas" ? "var(--ok)" : "var(--texto-3)"} />
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: "block", fontWeight: 600, fontSize: 13 }}>Notificaciones</span>
+                <span className="texto-3" style={{ fontSize: 11.5 }}>
+                  {notificaciones === "activas" ? "Te avisamos aunque la app esté cerrada"
+                    : notificaciones === "instalar" ? "Primero agrega MuniVox a la pantalla de inicio (Compartir, Agregar a inicio)"
+                    : notificaciones === "bloqueadas" ? "Bloqueadas: actívalas en la configuración del navegador"
+                    : notificaciones === "no-soportadas" ? "Este navegador no permite notificaciones"
+                    : notificaciones === "sin-configurar" ? "Aún no disponibles: falta configurarlas en el servidor"
+                    : "Recibe un aviso cuando te asignen una tarea"}
+                </span>
+              </span>
+            </span>
+            {["activas", "inactivas"].includes(notificaciones) && (
+              <button className={`interruptor${notificaciones === "activas" ? " activo" : ""}`} onClick={alternarNotificaciones} disabled={cambiandoNotif} aria-label="Notificaciones" style={{ width: 56, height: 30, opacity: cambiandoNotif ? 0.6 : 1 }} />
+            )}
           </div>
         </div>
 

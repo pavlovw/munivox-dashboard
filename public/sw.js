@@ -2,7 +2,7 @@
 // Permite abrir /terreno y mantener la sesión cuando no hay señal.
 // Los datos de la API (tareas) los guarda la propia app; aquí solo van archivos y la sesión.
 
-const VERSION = "munivox-v1";
+const VERSION = "munivox-v2";
 const ESTATICOS = `${VERSION}-estaticos`;
 const PAGINAS = `${VERSION}-paginas`;
 const SESION = `${VERSION}-sesion`;
@@ -76,4 +76,41 @@ self.addEventListener("fetch", (evento) => {
   if (request.mode === "navigate" && url.pathname.startsWith("/terreno")) {
     evento.respondWith(redPrimero(request, PAGINAS));
   }
+});
+
+// ============================================================================
+// NOTIFICACIONES PUSH (las envía la Lambda o el worker)
+// ============================================================================
+self.addEventListener("push", (evento) => {
+  let aviso = {};
+  try { aviso = evento.data ? evento.data.json() : {}; } catch (e) { aviso = { cuerpo: evento.data && evento.data.text() }; }
+  const titulo = aviso.titulo || "MuniVox";
+  evento.waitUntil(self.registration.showNotification(titulo, {
+    body: aviso.cuerpo || "Tienes una actualización en tus tareas.",
+    icon: "/iconos/icono-192.png",       // logo de MuniVox
+    badge: "/iconos/insignia-96.png",    // silueta para la barra de estado de Android
+    tag: aviso.tag || undefined,         // una tarea = una notificación (se reemplaza, no se acumula)
+    renotify: !!aviso.tag,
+    requireInteraction: !!aviso.urgente, // las urgentes quedan visibles hasta que se tocan
+    vibrate: aviso.urgente ? [300, 120, 300, 120, 300] : [180, 80, 180],
+    data: { url: aviso.url || "/terreno" },
+    lang: "es-CL",
+  }));
+});
+
+// Al tocar la notificación se abre la app en la tarea correspondiente
+self.addEventListener("notificationclick", (evento) => {
+  evento.notification.close();
+  const destino = new URL((evento.notification.data && evento.notification.data.url) || "/terreno", self.location.origin).href;
+  evento.waitUntil((async () => {
+    const abiertas = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const cliente of abiertas) {
+      if (new URL(cliente.url).pathname.startsWith("/terreno")) {
+        await cliente.focus();
+        if ("navigate" in cliente) return cliente.navigate(destino);
+        return;
+      }
+    }
+    return self.clients.openWindow(destino);
+  })());
 });
