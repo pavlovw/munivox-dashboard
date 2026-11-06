@@ -12,7 +12,7 @@ import { Icono } from "../../components/ui/Iconos";
 import { useAvisos } from "../../components/ui/Avisos";
 import { useApi, mensajeError } from "../../lib/useApi";
 import { usePerfil } from "../../lib/usePerfil";
-import { useFavicon, colorIcono } from "../../lib/favicon";
+import { useFavicon, colorIcono, claveIcono } from "../../lib/favicon";
 import { useTiempoReal, useRefresco, useAgrupado } from "../../lib/useTiempoReal";
 import { useAhora, usePreferencia, sonarAlerta } from "../../lib/hooks";
 import { distanciaKm } from "../../lib/geo";
@@ -40,7 +40,7 @@ export default function ConsolaDepartamento() {
   const [deptoAdmin, setDeptoAdmin] = useState(1);
   const deptoId = perfil?.rol === "ADMINISTRADOR" ? deptoAdmin : perfil?.departamentoId ?? null;
   const depto = departamentoInfo(deptoId ?? undefined);
-  useFavicon(perfil && deptoId ? colorIcono("OPERADOR", deptoId) : null);
+  useFavicon(perfil && deptoId ? colorIcono("OPERADOR", deptoId) : null, perfil && deptoId ? claveIcono("OPERADOR", deptoId) : null);
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [funcionarios, setFuncionarios] = useState<Operador[]>([]);

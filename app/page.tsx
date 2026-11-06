@@ -23,7 +23,7 @@ import { useAvisos } from "../components/ui/Avisos";
 
 import { useApi, mensajeError } from "../lib/useApi";
 import { usePerfil } from "../lib/usePerfil";
-import { useFavicon, colorIcono } from "../lib/favicon";
+import { useFavicon, colorIcono, claveIcono } from "../lib/favicon";
 import { useTiempoReal, useRefresco, useAgrupado } from "../lib/useTiempoReal";
 import { useAhora, usePreferencia, sonarAlerta } from "../lib/hooks";
 import type { Ticket, Prioridad, Estado } from "../lib/tipos";
@@ -50,7 +50,7 @@ const MOTIVOS_DESCARTE = [
 
 export default function CentralC4() {
   const { perfil, error: errorPerfil } = usePerfil(["ADMINISTRADOR"]);
-  useFavicon(perfil ? colorIcono("ADMINISTRADOR") : null);
+  useFavicon(perfil ? colorIcono("ADMINISTRADOR") : null, perfil ? claveIcono("ADMINISTRADOR") : null);
   const api = useApi();
   const avisar = useAvisos();
   const ahora = useAhora(30000);

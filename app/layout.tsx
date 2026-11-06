@@ -18,6 +18,8 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "MuniVox | Central C4 Buin",
   description: "Gestión de reportes ciudadanos de la Municipalidad de Buin",
+  // Acceso directo en la pantalla de inicio del celular (se abre como app)
+  appleWebApp: { capable: true, title: "MuniVox", statusBarStyle: "black" },
 };
 
 export const viewport: Viewport = {

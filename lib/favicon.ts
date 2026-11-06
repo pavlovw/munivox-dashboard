@@ -13,6 +13,15 @@ const COLORES_DEPARTAMENTO: Record<number, { jefatura: string; terreno: string }
   4: { jefatura: "#7048E8", terreno: "#4A2BB0" }, // Obras Municipales
 };
 
+const CLAVE_DEPARTAMENTO: Record<number, string> = { 1: "aseo", 2: "transito", 3: "seguridad", 4: "obras" };
+
+/** Nombre del PNG en public/iconos para el acceso directo del celular */
+export function claveIcono(rol: Rol, departamentoId?: number | null) {
+  const d = departamentoId ? CLAVE_DEPARTAMENTO[departamentoId] : undefined;
+  if (!d || (rol === "ADMINISTRADOR" && !departamentoId)) return "c4";
+  return `${d}-${rol === "TERRENO" ? "terreno" : "jefatura"}`;
+}
+
 export function colorIcono(rol: Rol, departamentoId?: number | null) {
   if (rol === "ADMINISTRADOR" && !departamentoId) return COLOR_ICONO_C4;
   const c = departamentoId ? COLORES_DEPARTAMENTO[departamentoId] : undefined;
@@ -31,8 +40,24 @@ export function svgFavicon(color: string) {
   );
 }
 
-/** Cambia el ícono de la pestaña mientras la página está abierta */
-export function useFavicon(color?: string | null) {
+/**
+ * Cambia el ícono de la pestaña y el de "Añadir a pantalla de inicio" (apple-touch-icon).
+ * El iPhone toma el segundo una sola vez, al crear el acceso directo.
+ */
+export function useFavicon(color?: string | null, clave?: string | null) {
+  useEffect(() => {
+    if (!clave) return;
+    const href = `/iconos/apple-${clave}.png`;
+    let enlaces = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="apple-touch-icon"]'));
+    if (!enlaces.length) {
+      const link = document.createElement("link");
+      link.rel = "apple-touch-icon";
+      document.head.appendChild(link);
+      enlaces = [link];
+    }
+    enlaces.forEach(l => { l.href = href; l.setAttribute("sizes", "180x180"); });
+  }, [clave]);
+
   useEffect(() => {
     if (!color) return;
     const href = `data:image/svg+xml,${encodeURIComponent(svgFavicon(color))}`;

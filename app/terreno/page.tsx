@@ -10,7 +10,7 @@ import { Icono } from "../../components/ui/Iconos";
 import { useAvisos } from "../../components/ui/Avisos";
 import { useApi, mensajeError } from "../../lib/useApi";
 import { usePerfil } from "../../lib/usePerfil";
-import { useFavicon, colorIcono } from "../../lib/favicon";
+import { useFavicon, colorIcono, claveIcono } from "../../lib/favicon";
 import { useTiempoReal, useRefresco, useAgrupado } from "../../lib/useTiempoReal";
 import { useAhora, sonarAlerta } from "../../lib/hooks";
 import { distanciaKm, enlaceGoogleMaps, enlaceWaze, unidadVecinalDe } from "../../lib/geo";
@@ -33,7 +33,7 @@ type Grupo = "NUEVAS" | "EN_CURSO" | "CERRADAS";
 
 export default function AppTerreno() {
   const { perfil, error: errorPerfil } = usePerfil(["TERRENO"]);
-  useFavicon(perfil ? colorIcono("TERRENO", perfil.departamentoId) : null);
+  useFavicon(perfil ? colorIcono("TERRENO", perfil.departamentoId) : null, perfil ? claveIcono("TERRENO", perfil.departamentoId) : null);
   const api = useApi();
   const avisar = useAvisos();
   const ahora = useAhora(30000);
