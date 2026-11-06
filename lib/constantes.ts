@@ -6,7 +6,7 @@ import type { Estado, Prioridad, Ticket, Historial } from "./tipos";
 export const ESTADOS: Record<Estado, { etiqueta: string; corta: string; color: string; descripcion: string }> = {
   PENDIENTE:   { etiqueta: "Pendiente",     corta: "Nuevo",       color: "#D9480F", descripcion: "Ingresado por WhatsApp, sin derivar" },
   EN_REVISION: { etiqueta: "En revisión",   corta: "Revisión",    color: "#1D4ED8", descripcion: "En el departamento, por asignar o por confirmar" },
-  DESPACHADO:  { etiqueta: "Despachado",    corta: "En terreno",  color: "#7048E8", descripcion: "El funcionario aceptó y va en camino" },
+  DESPACHADO:  { etiqueta: "Despachado",    corta: "En terreno",  color: "#7048E8", descripcion: "Un funcionario tomó el caso" },
   RESUELTO:    { etiqueta: "Resuelto",      corta: "Resuelto",    color: "#2B8A3E", descripcion: "Caso cerrado con solución" },
   DESCARTADO:  { etiqueta: "Descartado",    corta: "Descartado",  color: "#6B7689", descripcion: "Cerrado sin intervención" },
 };

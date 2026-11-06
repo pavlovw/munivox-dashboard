@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { signOut } from "next-auth/react";
-import { FiLogOut, FiArrowLeft, FiNavigation, FiMap, FiCheck, FiX, FiCrosshair, FiInbox, FiCpu, FiImage, FiMessageSquare, FiClock, FiAlertTriangle, FiCamera } from "react-icons/fi";
+import {
+  FiLogOut, FiArrowLeft, FiNavigation, FiMap, FiCheck, FiX, FiCrosshair, FiInbox, FiCpu, FiImage, FiMessageSquare,
+  FiClock, FiAlertTriangle, FiCamera, FiTruck, FiWifiOff, FiUploadCloud, FiBriefcase,
+} from "react-icons/fi";
 
 import { Logo, PantallaCarga, IndicadorConexion, IndicadorSla, InsigniaPrioridad, Conversacion, Galeria, LineaTiempo, Seccion, Esqueleto, Vacio, Modal } from "../../components/ui/Comunes";
 import { Icono } from "../../components/ui/Iconos";
@@ -14,22 +17,60 @@ import { useFavicon, colorIcono, claveIcono } from "../../lib/favicon";
 import { useTiempoReal, useRefresco, useAgrupado } from "../../lib/useTiempoReal";
 import { useAhora, sonarAlerta } from "../../lib/hooks";
 import { distanciaKm, enlaceGoogleMaps, enlaceWaze, unidadVecinalDe } from "../../lib/geo";
+import {
+  guardarLocal, leerLocal, useEnLinea, limiteDeTiempo, esErrorDeRed,
+  encolar, listarPendientes, quitarPendiente, registrarServiceWorker, type AccionPendiente,
+} from "../../lib/sinConexion";
 import type { Ticket, Operador } from "../../lib/tipos";
 import { PRIORIDADES, categoriaInfo, prioridadDe, slaDe, tiempoRelativo, resumenDescripcion, horaCorta } from "../../lib/constantes";
 
+// El mapa interactivo es pesado: solo se descarga si el funcionario lo pide
 const MapaCompacto = dynamic(() => import("../../components/Map"), {
   ssr: false,
   loading: () => <div className="esqueleto" style={{ height: "100%" }} />,
 });
 
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
 const MOTIVOS_RECHAZO = ["Estoy atendiendo otra emergencia", "Fuera de mi zona de trabajo", "No tengo el equipamiento necesario", "Falla del vehículo", "Término de turno"];
 const FRASES_CIERRE = ["Se reparó el problema en el lugar.", "Se retiraron los residuos del lugar.", "Se coordinó con la empresa responsable.", "Se instaló señalización provisoria."];
 
 // Envío de posición: como máximo cada 20 s, o antes si se movió más de 30 m
 const INTERVALO_GPS_MS = 20000;
 const DISTANCIA_GPS_KM = 0.03;
+const LIMITE_RED_MS = 15000; // con mala señal no se espera indefinidamente
 
 type Grupo = "NUEVAS" | "EN_CURSO" | "CERRADAS";
+
+const enCaminoDesde = (t: Ticket) => (t.historial || []).find(h => String(h.comentario || "").startsWith("En camino"))?.createdAt || null;
+
+/** Aplica sobre los datos las acciones que aún no se envían, para que la pantalla refleje lo que hizo el funcionario */
+function aplicarPendientes(tickets: Ticket[], pendientes: AccionPendiente[]) {
+  if (!pendientes.length) return tickets;
+  return tickets.flatMap(t => {
+    const mias = pendientes.filter(p => p.ticketId === t.id);
+    if (!mias.length) return [t];
+    let x: Ticket = { ...t };
+    for (const p of mias) {
+      const c = p.cuerpo as any;
+      if (c.operadorAsignadoId === null) return []; // rechazada: deja de ser suya
+      if (c.nuevoEstado) x = { ...x, estado: c.nuevoEstado, updatedAt: new Date(p.creada).toISOString() };
+      if (c.enCamino) x = { ...x, historial: [{ id: p.id, estadoNuevo: x.estado, comentario: "En camino al lugar", createdAt: new Date(p.creada).toISOString() }, ...(x.historial || [])] };
+    }
+    return [x];
+  });
+}
+
+function MapaEstatico({ ticket, posicion }: { ticket: Ticket; posicion: { lat: number; lng: number } | null }) {
+  const [fallo, setFallo] = useState(false);
+  if (ticket.latitud == null || !MAPBOX_TOKEN || fallo) {
+    return <div className="vacio" style={{ height: "100%", border: 0 }}><FiMap size={20} />{ticket.latitud == null ? "Sin ubicación" : "Mapa no disponible sin conexión"}</div>;
+  }
+  const color = categoriaInfo(ticket.categoria?.nombre).color.replace("#", "");
+  const pines = [`pin-l+${color}(${ticket.longitud},${ticket.latitud})`, ...(posicion ? [`pin-s+0A1222(${posicion.lng.toFixed(5)},${posicion.lat.toFixed(5)})`] : [])].join(",");
+  const vista = posicion ? "auto" : `${ticket.longitud},${ticket.latitud},15.5`;
+  const src = `https://api.mapbox.com/styles/v1/mapbox/light-v11/static/${pines}/${vista}/600x300@2x?padding=50&access_token=${MAPBOX_TOKEN}`;
+  return <img src={src} alt="Ubicación del problema" decoding="async" onError={() => setFallo(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />;
+}
 
 export default function AppTerreno() {
   const { perfil, error: errorPerfil } = usePerfil(["TERRENO"]);
@@ -37,9 +78,13 @@ export default function AppTerreno() {
   const api = useApi();
   const avisar = useAvisos();
   const ahora = useAhora(30000);
+  const enLinea = useEnLinea();
 
-  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [ticketsServidor, setTicketsServidor] = useState<Ticket[]>([]);
+  const [pendientes, setPendientes] = useState<AccionPendiente[]>([]);
+  const [guardadoEn, setGuardadoEn] = useState<number | null>(null);
   const [cargando, setCargando] = useState(true);
+  const [sincronizando, setSincronizando] = useState(false);
   const [grupo, setGrupo] = useState<Grupo>("NUEVAS");
   const [activoId, setActivoId] = useState<string | null>(null);
   const [procesando, setProcesando] = useState(false);
@@ -48,27 +93,44 @@ export default function AppTerreno() {
   const [fotoCierre, setFotoCierre] = useState<string | null>(null);
   const [preparandoFoto, setPreparandoFoto] = useState(false);
   const [ordenCercania, setOrdenCercania] = useState(false);
+  const [mapaInteractivo, setMapaInteractivo] = useState(false);
 
+  const [enTurno, setEnTurno] = useState(false);
   const [gpsActivo, setGpsActivo] = useState(false);
   const [posicion, setPosicion] = useState<{ lat: number; lng: number; precision: number } | null>(null);
   const [ultimoEnvio, setUltimoEnvio] = useState<number | null>(null);
   const [errorGps, setErrorGps] = useState<string | null>(null);
   const envioRef = useRef<{ t: number; lat: number; lng: number } | null>(null);
 
+  const claveCache = perfil ? `munivox_terreno_tareas_${perfil.id}` : null;
+  const tickets = useMemo(() => aplicarPendientes(ticketsServidor, pendientes), [ticketsServidor, pendientes]);
+
+  useEffect(() => { registrarServiceWorker(); }, []);
+
   // --------------------------------------------------------------------------
-  // TAREAS
+  // TAREAS (copia local para abrir al instante y funcionar sin señal)
   // --------------------------------------------------------------------------
+  useEffect(() => {
+    if (!claveCache) return;
+    const local = leerLocal<Ticket[]>(claveCache);
+    if (local) { setTicketsServidor(local.datos); setGuardadoEn(local.guardado); setCargando(false); }
+    listarPendientes().then(setPendientes).catch(() => {});
+  }, [claveCache]);
+
   const cargar = useCallback(async () => {
+    if (!claveCache || (typeof navigator !== "undefined" && !navigator.onLine)) { setCargando(false); return; }
     try {
-      const res = await api("/tickets");
+      const res = await api("/tickets", { signal: limiteDeTiempo(LIMITE_RED_MS) });
       if (res.ok) {
         const data: Ticket[] = await res.json();
-        setTickets(prev => (JSON.stringify(prev) === JSON.stringify(data) ? prev : data));
+        setTicketsServidor(prev => (JSON.stringify(prev) === JSON.stringify(data) ? prev : data));
+        guardarLocal(claveCache, data);
+        setGuardadoEn(Date.now());
       }
     } catch {} finally {
       setCargando(false);
     }
-  }, [api]);
+  }, [api, claveCache]);
 
   const recargar = useAgrupado(cargar, 300);
   useEffect(() => { if (perfil) cargar(); }, [perfil, cargar]);
@@ -77,30 +139,91 @@ export default function AppTerreno() {
     activo: !!perfil,
     onTicketCambio: e => { if (!e.operadorAsignadoId || e.operadorAsignadoId === perfil?.id || e.tipo === "departamento") recargar(); },
   });
-  useRefresco(cargar, conectado, !!perfil);
+  useRefresco(cargar, conectado, !!perfil && enLinea);
+
+  // --------------------------------------------------------------------------
+  // COLA DE ACCIONES: se envían en orden apenas hay señal
+  // --------------------------------------------------------------------------
+  const enviandoRef = useRef(false);
+  const enviarPendientes = useCallback(async () => {
+    if (enviandoRef.current || !navigator.onLine) return;
+    enviandoRef.current = true;
+    setSincronizando(true);
+    let enviadas = 0;
+    try {
+      for (const p of await listarPendientes()) {
+        try {
+          const res = await api(p.ruta, { method: "PUT", body: JSON.stringify(p.cuerpo), signal: limiteDeTiempo(30000) });
+          if (!res.ok) avisar({ titulo: `No se pudo: ${p.descripcion}`, mensaje: await mensajeError(res), tipo: "error", duracion: 9000 });
+          else enviadas++;
+          await quitarPendiente(p.id); // con error de la API no se reintenta: se avisa al funcionario
+        } catch (e) {
+          if (esErrorDeRed(e)) break; // sin señal: se reintenta después
+          await quitarPendiente(p.id);
+        }
+      }
+    } finally {
+      enviandoRef.current = false;
+      setSincronizando(false);
+      setPendientes(await listarPendientes().catch(() => []));
+      if (enviadas) {
+        avisar({ titulo: enviadas === 1 ? "Se envió 1 acción pendiente" : `Se enviaron ${enviadas} acciones pendientes`, tipo: "ok" });
+        avisarCambio({ tipo: "terreno", departamentoId: perfil?.departamentoId ?? undefined });
+        cargar();
+      }
+    }
+  }, [api, avisar, avisarCambio, cargar, perfil?.departamentoId]);
+
+  useEffect(() => { if (enLinea && perfil) enviarPendientes(); }, [enLinea, perfil, enviarPendientes]);
+  useEffect(() => {
+    if (!pendientes.length) return;
+    const id = setInterval(enviarPendientes, 30000);
+    return () => clearInterval(id);
+  }, [pendientes.length, enviarPendientes]);
 
   // Aviso con vibración cuando llega una tarea nueva
   const conocidas = useRef<Set<string> | null>(null);
   useEffect(() => {
     if (cargando) return;
-    const pendientes = tickets.filter(t => t.estado === "EN_REVISION");
+    const nuevasIds = tickets.filter(t => t.estado === "EN_REVISION");
     if (conocidas.current) {
-      const nuevas = pendientes.filter(t => !conocidas.current!.has(t.id));
+      const nuevas = nuevasIds.filter(t => !conocidas.current!.has(t.id));
       if (nuevas.length) {
         try { navigator.vibrate?.([180, 80, 180]); } catch {}
         sonarAlerta("nuevo");
         avisar({ titulo: nuevas.length === 1 ? "Nueva tarea asignada" : `${nuevas.length} tareas nuevas`, mensaje: nuevas[0].categoria?.nombre || nuevas[0].codigoTicket, tipo: "nuevo", accion: { etiqueta: "Ver tarea", onClick: () => setActivoId(nuevas[0].id) } });
       }
     }
-    conocidas.current = new Set(pendientes.map(t => t.id));
+    conocidas.current = new Set(nuevasIds.map(t => t.id));
   }, [tickets, cargando, avisar]);
 
   // --------------------------------------------------------------------------
-  // GPS
+  // TURNO Y UBICACIÓN (independientes; la ubicación solo durante el turno)
   // --------------------------------------------------------------------------
   useEffect(() => {
-    try { if (localStorage.getItem("munivox_gps_activo") === "true") setGpsActivo(true); } catch {}
-  }, []);
+    if (!perfil) return;
+    setEnTurno(!!perfil.enTurno);
+    try { if (perfil.enTurno && localStorage.getItem("munivox_gps_activo") === "true") setGpsActivo(true); } catch {}
+  }, [perfil]);
+
+  const enviarEstadoTrabajo = async (cuerpo: Record<string, unknown>, descripcion: string) => {
+    try {
+      const res = await api("/operadores/ubicacion", { method: "PUT", body: JSON.stringify(cuerpo), signal: limiteDeTiempo(LIMITE_RED_MS) });
+      if (res.ok) avisarUbicacion({ departamentoId: perfil?.departamentoId });
+    } catch (e) {
+      if (esErrorDeRed(e)) {
+        await encolar({ ruta: "/operadores/ubicacion", cuerpo, descripcion });
+        setPendientes(await listarPendientes());
+      }
+    }
+  };
+
+  const cambiarTurno = async (valor: boolean) => {
+    setEnTurno(valor);
+    if (!valor) setGpsActivo(false);
+    avisar({ titulo: valor ? "Turno iniciado" : "Turno terminado", mensaje: valor ? "Tu jefatura te ve disponible." : "Dejaste de compartir tu ubicación.", tipo: "ok", duracion: 3000 });
+    await enviarEstadoTrabajo({ enTurno: valor, ...(valor ? {} : { gpsActivo: false }) }, valor ? "Iniciar turno" : "Terminar turno");
+  };
 
   useEffect(() => {
     if (!perfil) return;
@@ -108,8 +231,8 @@ export default function AppTerreno() {
 
     if (!gpsActivo) {
       setPosicion(null);
-      api("/operadores/ubicacion", { method: "PUT", body: JSON.stringify({ gpsActivo: false }) })
-        .then(() => avisarUbicacion({ departamentoId: perfil.departamentoId })).catch(() => {});
+      envioRef.current = null;
+      if (enTurno) enviarEstadoTrabajo({ gpsActivo: false }, "Dejar de compartir ubicación");
       return;
     }
     if (!("geolocation" in navigator)) { setErrorGps("Este dispositivo no tiene GPS disponible."); setGpsActivo(false); return; }
@@ -123,16 +246,17 @@ export default function AppTerreno() {
         const ahoraMs = Date.now();
         const movido = previo ? distanciaKm(previo.lat, previo.lng, lat, lng) : Infinity;
         if (previo && ahoraMs - previo.t < INTERVALO_GPS_MS && movido < DISTANCIA_GPS_KM) return;
+        if (!navigator.onLine) return; // sin señal no se acumulan posiciones viejas
         envioRef.current = { t: ahoraMs, lat, lng };
-        api("/operadores/ubicacion", { method: "PUT", body: JSON.stringify({ latitud: lat, longitud: lng, gpsActivo: true }) })
+        api("/operadores/ubicacion", { method: "PUT", body: JSON.stringify({ latitud: lat, longitud: lng, gpsActivo: true }), signal: limiteDeTiempo(LIMITE_RED_MS) })
           .then(r => { if (r.ok) { setUltimoEnvio(Date.now()); avisarUbicacion({ departamentoId: perfil.departamentoId }); } })
-          .catch(() => {});
+          .catch(() => { envioRef.current = null; });
       },
       err => {
         setErrorGps(err.code === err.PERMISSION_DENIED ? "Permiso de ubicación denegado. Actívalo en la configuración del navegador." : "No se pudo obtener la posición. Reintentando.");
         if (err.code === err.PERMISSION_DENIED) setGpsActivo(false);
       },
-      { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 }
+      { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }
     );
     return () => navigator.geolocation.clearWatch(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -159,13 +283,24 @@ export default function AppTerreno() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cargando]);
 
+  useEffect(() => { setMapaInteractivo(false); }, [activoId]);
+
   const activo = tickets.find(t => t.id === activoId) || null;
 
-  const actualizar = async (cuerpo: Record<string, unknown>, exito: string) => {
+  /** Envía la acción; si no hay señal, la deja en cola y la pantalla avanza igual */
+  const actualizar = async (cuerpo: Record<string, unknown>, exito: string, descripcion: string) => {
     if (!activo) return false;
     setProcesando(true);
+    const ponerEnCola = async () => {
+      await encolar({ ruta: `/tickets/${activo.id}`, cuerpo, descripcion: `${descripcion} ${activo.codigoTicket}`, ticketId: activo.id });
+      setPendientes(await listarPendientes());
+      avisar({ titulo: "Guardado sin conexión", mensaje: "Se enviará automáticamente cuando vuelva la señal.", tipo: "alerta", duracion: 6000 });
+      try { navigator.vibrate?.(60); } catch {}
+      return true;
+    };
     try {
-      const res = await api(`/tickets/${activo.id}`, { method: "PUT", body: JSON.stringify(cuerpo) });
+      if (!navigator.onLine) return await ponerEnCola();
+      const res = await api(`/tickets/${activo.id}`, { method: "PUT", body: JSON.stringify(cuerpo), signal: limiteDeTiempo(cuerpo.fotoCierre ? 45000 : LIMITE_RED_MS) });
       if (!res.ok) {
         avisar({ titulo: "No se pudo completar", mensaje: await mensajeError(res), tipo: "error" });
         return false;
@@ -177,8 +312,9 @@ export default function AppTerreno() {
       avisarCambio({ id: activo.id, tipo: "terreno", departamentoId: activo.departamentoId ?? undefined });
       await cargar();
       return true;
-    } catch {
-      avisar({ titulo: "Sin conexión", mensaje: "Revisa tu señal e intenta de nuevo.", tipo: "error" });
+    } catch (e) {
+      if (esErrorDeRed(e)) return await ponerEnCola();
+      avisar({ titulo: "No se pudo completar", tipo: "error" });
       return false;
     } finally {
       setProcesando(false);
@@ -189,19 +325,21 @@ export default function AppTerreno() {
     const texto = textoModal.trim();
     let ok = false;
     if (modal === "ACEPTAR") {
-      ok = await actualizar({ nuevoEstado: "DESPACHADO", comentario: "El funcionario aceptó la tarea y va en camino." }, "Tarea aceptada");
+      ok = await actualizar({ nuevoEstado: "DESPACHADO", comentario: "El funcionario tomó el caso." }, "Caso tomado", "Tomar");
       if (ok) setGrupo("EN_CURSO");
     }
     if (modal === "RECHAZAR") {
-      ok = await actualizar({ operadorAsignadoId: null, nuevoEstado: "EN_REVISION", comentario: `Rechazado por funcionario: ${texto}` }, "Tarea devuelta a la jefatura");
+      ok = await actualizar({ operadorAsignadoId: null, nuevoEstado: "EN_REVISION", comentario: `Rechazado por funcionario: ${texto}` }, "Tarea devuelta a la jefatura", "Rechazar");
       if (ok) setActivoId(null);
     }
     if (modal === "RESOLVER") {
-      ok = await actualizar({ nuevoEstado: "RESUELTO", comentario: texto, ...(fotoCierre && { fotoCierre }) }, "Caso cerrado");
+      ok = await actualizar({ nuevoEstado: "RESUELTO", comentario: texto, ...(fotoCierre && { fotoCierre }) }, "Caso cerrado", "Cerrar");
       if (ok) { setActivoId(null); setGrupo("CERRADAS"); setFotoCierre(null); }
     }
     if (ok) { setModal(null); setTextoModal(""); }
   };
+
+  const voyEnCamino = () => actualizar({ enCamino: true }, "Avisamos al vecino que vas en camino", "En camino a");
 
   // Reduce la foto antes de enviarla (máximo 1280 px, JPEG): sube rápido con poca señal
   const prepararFoto = async (archivo?: File) => {
@@ -234,13 +372,31 @@ export default function AppTerreno() {
   if (!perfil) return <PantallaCarga />;
 
   const yoEnMapa: Operador[] = posicion ? [{ ...perfil, latitud: posicion.lat, longitud: posicion.lng, gpsActivo: true, ultimaUbicacion: new Date(ultimoEnvio || ahora).toISOString() }] : [];
-
   const contenedor: React.CSSProperties = { maxWidth: 620, margin: "0 auto", width: "100%" };
+
+  // Aviso de conexión (sin señal o con acciones por enviar)
+  const barraConexion = (!enLinea || pendientes.length > 0) && (
+    <div className="anim-aparecer" style={{ background: enLinea ? "var(--aviso-suave)" : "var(--marino-2)", color: enLinea ? "#7A4A00" : "#fff", borderBottom: "1px solid var(--borde)" }}>
+      <div className="fila" style={{ ...contenedor, padding: "8px 14px", gap: 10, fontSize: 12.5 }}>
+        {enLinea ? <FiUploadCloud size={15} /> : <FiWifiOff size={15} />}
+        <span className="crece">
+          {!enLinea ? <>Sin conexión. {guardadoEn ? `Tareas guardadas a las ${horaCorta(new Date(guardadoEn))}.` : ""}</> : null}
+          {pendientes.length > 0 && <> {pendientes.length} acción{pendientes.length === 1 ? "" : "es"} por enviar{enLinea ? "." : " cuando vuelva la señal."}</>}
+        </span>
+        {enLinea && pendientes.length > 0 && (
+          <button className="btn btn-sm btn-secundario" onClick={enviarPendientes} disabled={sincronizando}>
+            {sincronizando ? <span className="girador" style={{ width: 12, height: 12 }} /> : null}{sincronizando ? "Enviando" : "Enviar ahora"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
 
   // ============================ DETALLE ============================
   if (activo) {
     const cat = categoriaInfo(activo.categoria?.nombre);
     const km = distanciaA(activo);
+    const enCamino = enCaminoDesde(activo);
     return (
       <div style={{ minHeight: "100vh", background: "var(--fondo)", display: "flex", flexDirection: "column" }}>
         <header style={{ position: "sticky", top: 0, zIndex: 20, background: "var(--marino)", color: "#fff", borderBottom: `3px solid ${cat.color}` }}>
@@ -253,18 +409,28 @@ export default function AppTerreno() {
             <span style={{ width: 36, height: 36, background: cat.color, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icono nombre={cat.icono} size={20} /></span>
           </div>
         </header>
+        {barraConexion}
 
-        <div style={{ height: 230, position: "relative", borderBottom: "1px solid var(--borde)" }}>
-          <MapaCompacto compacto tickets={[activo]} enfoque={activo.latitud != null ? [activo.latitud, activo.longitud!] : null} funcionarios={yoEnMapa}
-            lineaDespacho={posicion && activo.latitud != null && activo.estado === "DESPACHADO" ? { desde: [posicion.lat, posicion.lng], hasta: [activo.latitud, activo.longitud!] } : null} zoomEnfoque={15.5} />
+        <div style={{ height: 230, position: "relative", borderBottom: "1px solid var(--borde)", background: "var(--superficie-3)" }}>
+          {mapaInteractivo ? (
+            <MapaCompacto compacto tickets={[activo]} enfoque={activo.latitud != null ? [activo.latitud, activo.longitud!] : null} funcionarios={yoEnMapa}
+              lineaDespacho={posicion && activo.latitud != null && activo.estado === "DESPACHADO" ? { desde: [posicion.lat, posicion.lng], hasta: [activo.latitud, activo.longitud!] } : null} zoomEnfoque={15.5} />
+          ) : (
+            <MapaEstatico ticket={activo} posicion={posicion} />
+          )}
           <div style={{ position: "absolute", left: 10, bottom: 10, zIndex: 5, background: "var(--marino)", color: "#fff", padding: "6px 10px", fontSize: 12 }}>
-            <span className="mono" style={{ fontWeight: 600 }}>{km != null ? `${km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`}` : "Activa tu GPS para ver la distancia"}</span>
+            <span className="mono" style={{ fontWeight: 600 }}>{km != null ? `${km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`}` : "Comparte tu ubicación para ver la distancia"}</span>
             {km != null && <span style={{ color: "var(--marino-texto)" }}> hasta el lugar</span>}
           </div>
+          {!mapaInteractivo && activo.latitud != null && enLinea && (
+            <button className="btn btn-sm btn-secundario" style={{ position: "absolute", right: 10, bottom: 10, zIndex: 5 }} onClick={() => setMapaInteractivo(true)}>
+              <FiMap size={12} /> Mapa interactivo
+            </button>
+          )}
         </div>
 
-        <div style={{ ...contenedor, padding: 14, display: "flex", flexDirection: "column", gap: 18, paddingBottom: 130 }}>
-          <div className="panel anim-arriba" style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+        <div style={{ ...contenedor, padding: 14, display: "flex", flexDirection: "column", gap: 18, paddingBottom: 170 }}>
+          <div className="panel" style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
             <div style={{ padding: 12, borderRight: "1px solid var(--borde)" }}>
               <div className="rotulo" style={{ marginBottom: 6 }}>Prioridad</div>
               <InsigniaPrioridad prioridad={prioridadDe(activo)} />
@@ -296,20 +462,28 @@ export default function AppTerreno() {
 
         {/* Barra de acciones fija */}
         <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 30, background: "var(--superficie)", borderTop: "1px solid var(--borde)", boxShadow: "0 -8px 24px -12px rgba(10,18,34,.3)" }}>
-          <div className="anim-arriba" style={{ ...contenedor, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ ...contenedor, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
             {(activo.estado === "EN_REVISION" || activo.estado === "PENDIENTE") && (
               <div className="fila" style={{ gap: 8 }}>
                 <button className="btn btn-lg btn-peligro-borde" style={{ flex: 1 }} onClick={() => { setTextoModal(""); setModal("RECHAZAR"); }}><FiX size={16} /> Rechazar</button>
-                <button className="btn btn-lg btn-ok" style={{ flex: 2 }} onClick={() => setModal("ACEPTAR")}><FiCheck size={16} /> Aceptar tarea</button>
+                <button className="btn btn-lg btn-ok" style={{ flex: 2 }} onClick={() => setModal("ACEPTAR")}><FiCheck size={16} /> Tomar el caso</button>
               </div>
             )}
-            {activo.estado === "DESPACHADO" && activo.latitud != null && (
+            {activo.estado === "DESPACHADO" && (
               <>
+                {activo.latitud != null && (
+                  <div className="fila" style={{ gap: 8 }}>
+                    <a className="btn btn-secundario" style={{ flex: 1 }} href={enlaceWaze(activo.latitud, activo.longitud!)} target="_blank" rel="noreferrer"><FiNavigation size={14} /> Waze</a>
+                    <a className="btn btn-secundario" style={{ flex: 1 }} href={enlaceGoogleMaps(activo.latitud, activo.longitud!)} target="_blank" rel="noreferrer"><FiMap size={14} /> Google Maps</a>
+                  </div>
+                )}
                 <div className="fila" style={{ gap: 8 }}>
-                  <a className="btn btn-secundario" style={{ flex: 1 }} href={enlaceWaze(activo.latitud, activo.longitud!)} target="_blank" rel="noreferrer"><FiNavigation size={14} /> Waze</a>
-                  <a className="btn btn-secundario" style={{ flex: 1 }} href={enlaceGoogleMaps(activo.latitud, activo.longitud!)} target="_blank" rel="noreferrer"><FiMap size={14} /> Google Maps</a>
+                  <button className="btn btn-lg btn-oscuro" style={{ flex: 1 }} onClick={voyEnCamino} disabled={procesando}
+                    title="Avisa al vecino que vas al lugar">
+                    <FiTruck size={16} /> {enCamino ? `En camino ${horaCorta(enCamino)}` : "Voy en camino"}
+                  </button>
+                  <button className="btn btn-lg btn-ok" style={{ flex: 1 }} onClick={() => { setTextoModal(""); setModal("RESOLVER"); }}><FiCheck size={16} /> Resuelto</button>
                 </div>
-                <button className="btn btn-lg btn-ok btn-bloque" onClick={() => { setTextoModal(""); setModal("RESOLVER"); }}><FiCheck size={16} /> Marcar como resuelto</button>
               </>
             )}
             {activo.estado === "RESUELTO" && <div className="fila" style={{ justifyContent: "center", color: "var(--ok)", fontWeight: 600, gap: 8, padding: 8 }}><FiCheck /> Caso cerrado {tiempoRelativo(activo.updatedAt, ahora)}</div>}
@@ -317,16 +491,21 @@ export default function AppTerreno() {
         </div>
 
         <Modal abierto={!!modal} onCerrar={() => setModal(null)}
-          titulo={modal === "ACEPTAR" ? "Aceptar tarea" : modal === "RECHAZAR" ? "Rechazar tarea" : "Cerrar caso"}
+          titulo={modal === "ACEPTAR" ? "Tomar el caso" : modal === "RECHAZAR" ? "Rechazar tarea" : "Cerrar caso"}
           subtitulo={`${activo.codigoTicket} | ${cat.nombre}`}
           pie={<>
             <button className="btn btn-fantasma" onClick={() => setModal(null)}>Volver</button>
             <button className={`btn ${modal === "RECHAZAR" ? "btn-peligro" : "btn-ok"}`} onClick={confirmar} disabled={procesando || (modal !== "ACEPTAR" && textoModal.trim().length < 5)}>
               {procesando ? <span className="girador" style={{ width: 12, height: 12 }} /> : <FiCheck size={14} />}
-              {modal === "ACEPTAR" ? "Sí, voy en camino" : modal === "RECHAZAR" ? "Rechazar" : "Cerrar y avisar al vecino"}
+              {modal === "ACEPTAR" ? "Sí, tomar el caso" : modal === "RECHAZAR" ? "Rechazar" : "Cerrar y avisar al vecino"}
             </button>
           </>}>
-          {modal === "ACEPTAR" && <p style={{ margin: 0, lineHeight: 1.6 }}>El vecino recibirá un aviso por WhatsApp indicando que un funcionario va en camino.{!gpsActivo && <><br /><strong style={{ color: "var(--alerta)" }}>Te recomendamos activar el GPS para que la jefatura vea tu avance.</strong></>}</p>}
+          {modal === "ACEPTAR" && (
+            <p style={{ margin: 0, lineHeight: 1.6 }}>
+              El vecino recibirá un aviso indicando que un funcionario tomó su caso y lo atenderá en los próximos días.
+              Cuando vayas al lugar, toca <strong>Voy en camino</strong> para avisarle.
+            </p>
+          )}
           {modal === "RECHAZAR" && (
             <>
               <p style={{ margin: 0, fontSize: 12.5, color: "var(--texto-2)" }}>La tarea vuelve a tu jefatura para reasignarla.</p>
@@ -344,11 +523,11 @@ export default function AppTerreno() {
               <div className="fila" style={{ flexWrap: "wrap", gap: 6 }}>
                 {FRASES_CIERRE.map(f => <button key={f} className="btn btn-sm btn-secundario" onClick={() => setTextoModal(f)}>{f}</button>)}
               </div>
-              <textarea className="textarea" autoFocus value={textoModal} onChange={e => setTextoModal(e.target.value)} placeholder="Informe de cierre" maxLength={500} />
+              <textarea className="textarea" value={textoModal} onChange={e => setTextoModal(e.target.value)} placeholder="Informe de cierre" maxLength={500} />
               <div className="campo">
                 <span className="rotulo">Foto del trabajo terminado (opcional)</span>
                 {fotoCierre ? (
-                  <div style={{ position: "relative", border: "1px solid var(--borde)" }} className="anim-escalar">
+                  <div style={{ position: "relative", border: "1px solid var(--borde)" }}>
                     <img src={fotoCierre} alt="Vista previa de la foto de cierre" style={{ width: "100%", maxHeight: 220, objectFit: "cover" }} />
                     <button className="btn btn-sm btn-secundario" style={{ position: "absolute", top: 8, right: 8 }} onClick={() => setFotoCierre(null)}><FiX size={12} /> Quitar</button>
                   </div>
@@ -359,7 +538,10 @@ export default function AppTerreno() {
                     <input type="file" accept="image/*" capture="environment" hidden onChange={e => prepararFoto(e.target.files?.[0])} />
                   </label>
                 )}
-                <span className="texto-3" style={{ fontSize: 11 }}>El vecino verá esta foto junto al informe. Evita que aparezcan personas o patentes.</span>
+                <span className="texto-3" style={{ fontSize: 11 }}>
+                  El vecino verá esta foto junto al informe. Evita que aparezcan personas o patentes.
+                  {!enLinea && " Sin señal: la foto se guardará y se enviará después."}
+                </span>
               </div>
             </>
           )}
@@ -379,36 +561,50 @@ export default function AppTerreno() {
     : grupos[grupo];
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--fondo)" }}>
+    <div className="app-liviana" style={{ minHeight: "100vh", background: "var(--fondo)" }}>
       <header style={{ position: "sticky", top: 0, zIndex: 20, background: "var(--marino)", color: "#fff" }}>
         <div className="fila entre" style={{ ...contenedor, padding: "12px 14px" }}>
           <Logo tamano={28} subtitulo="Terreno" />
           <div className="fila" style={{ gap: 12 }}>
-            <IndicadorConexion conectado={conectado} claro />
+            {enLinea ? <IndicadorConexion conectado={conectado} claro /> : <span className="fila rotulo" style={{ gap: 6, color: "#FFB27A" }}><FiWifiOff size={12} /> Sin señal</span>}
             <button onClick={() => signOut({ callbackUrl: "/login" })} aria-label="Cerrar sesión" style={{ width: 36, height: 36, background: "transparent", border: "1px solid var(--marino-borde)", color: "var(--marino-texto)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><FiLogOut size={15} /></button>
           </div>
         </div>
       </header>
+      {barraConexion}
 
       <div style={{ ...contenedor, padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* Identidad y GPS */}
+        {/* Identidad, turno y ubicación */}
         <div className="panel marco anim-arriba">
-          <div className="fila entre" style={{ padding: 14 }}>
-            <div>
-              <div className="rotulo">Funcionario en terreno</div>
-              <div style={{ fontWeight: 700, fontSize: 16, marginTop: 2 }}>{perfil.nombre}</div>
-              <div className="texto-3" style={{ fontSize: 12 }}>{perfil.departamento?.nombre || "Sin departamento"}</div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <button className={`interruptor${gpsActivo ? " activo" : ""}`} onClick={() => setGpsActivo(!gpsActivo)} aria-label="Transmitir ubicación" style={{ width: 56, height: 30 }} />
-              <div className="rotulo" style={{ marginTop: 6, color: gpsActivo ? "var(--ok)" : "var(--texto-3)" }}>{gpsActivo ? "GPS activo" : "GPS apagado"}</div>
-            </div>
+          <div style={{ padding: 14 }}>
+            <div className="rotulo">Funcionario en terreno</div>
+            <div style={{ fontWeight: 700, fontSize: 16, marginTop: 2 }}>{perfil.nombre}</div>
+            <div className="texto-3" style={{ fontSize: 12 }}>{perfil.departamento?.nombre || "Sin departamento"}</div>
           </div>
-          <div className="fila" style={{ borderTop: "1px solid var(--borde)", padding: "8px 14px", gap: 8, fontSize: 11.5, background: gpsActivo ? "var(--ok-suave)" : "var(--superficie-2)" }}>
-            <FiCrosshair size={13} color={gpsActivo ? "var(--ok)" : "var(--texto-3)"} />
-            {errorGps ? <span style={{ color: "var(--peligro)" }}>{errorGps}</span>
-              : gpsActivo ? (posicion ? <span>Precisión {Math.round(posicion.precision)} m | Enviado {ultimoEnvio ? horaCorta(new Date(ultimoEnvio)) : "--"}</span> : <span>Buscando señal GPS<span style={{ animation: "parpadeo 1s infinite" }}>...</span></span>)
-              : <span className="texto-3">Actívalo para que tu jefatura te asigne las tareas más cercanas.</span>}
+          <div className="fila entre" style={{ borderTop: "1px solid var(--borde)", padding: "10px 14px", background: enTurno ? "var(--ok-suave)" : "var(--superficie-2)" }}>
+            <span className="fila" style={{ gap: 10 }}>
+              <FiBriefcase size={16} color={enTurno ? "var(--ok)" : "var(--texto-3)"} />
+              <span>
+                <span style={{ display: "block", fontWeight: 600, fontSize: 13 }}>{enTurno ? "En turno" : "Fuera de turno"}</span>
+                <span className="texto-3" style={{ fontSize: 11.5 }}>{enTurno ? "Tu jefatura te ve disponible" : "Inicia tu turno para figurar como disponible"}</span>
+              </span>
+            </span>
+            <button className={`interruptor${enTurno ? " activo" : ""}`} onClick={() => cambiarTurno(!enTurno)} aria-label="En turno" style={{ width: 56, height: 30 }} />
+          </div>
+          <div className="fila entre" style={{ borderTop: "1px solid var(--borde)", padding: "10px 14px", opacity: enTurno ? 1 : 0.55 }}>
+            <span className="fila" style={{ gap: 10, minWidth: 0 }}>
+              <FiCrosshair size={16} color={gpsActivo ? "var(--ok)" : "var(--texto-3)"} />
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: "block", fontWeight: 600, fontSize: 13 }}>Compartir ubicación</span>
+                <span className="texto-3" style={{ fontSize: 11.5 }}>
+                  {!enTurno ? "Solo durante el turno. Es opcional."
+                    : errorGps ? <span style={{ color: "var(--peligro)" }}>{errorGps}</span>
+                    : gpsActivo ? (posicion ? `Precisión ${Math.round(posicion.precision)} m | Enviado ${ultimoEnvio ? horaCorta(new Date(ultimoEnvio)) : "--"}` : "Buscando señal GPS...")
+                    : "Opcional: ayuda a asignarte casos cercanos"}
+                </span>
+              </span>
+            </span>
+            <button className={`interruptor${gpsActivo ? " activo" : ""}`} onClick={() => enTurno && setGpsActivo(!gpsActivo)} disabled={!enTurno} aria-label="Compartir ubicación" style={{ width: 56, height: 30 }} />
           </div>
         </div>
 
@@ -416,7 +612,7 @@ export default function AppTerreno() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
           {pestanas.map((p, i) => (
             <button key={p.id} onClick={() => setGrupo(p.id)} className="anim-arriba"
-              style={{ ["--i" as any]: i, textAlign: "left", padding: "10px 12px", background: grupo === p.id ? "var(--marino)" : "var(--superficie)", color: grupo === p.id ? "#fff" : "var(--texto)", border: `1px solid ${grupo === p.id ? "var(--marino)" : "var(--borde)"}`, transition: "all 0.2s" }}>
+              style={{ ["--i" as any]: i, textAlign: "left", padding: "10px 12px", background: grupo === p.id ? "var(--marino)" : "var(--superficie)", color: grupo === p.id ? "#fff" : "var(--texto)", border: `1px solid ${grupo === p.id ? "var(--marino)" : "var(--borde)"}`, transition: "background-color 0.2s, color 0.2s" }}>
               <div className="rotulo" style={{ color: grupo === p.id ? "var(--marino-texto)" : undefined }}>{p.etiqueta}</div>
               <div className="mono" style={{ fontSize: 24, fontWeight: 600, marginTop: 2, color: p.id === "NUEVAS" && grupos.NUEVAS.length && grupo !== p.id ? "var(--alerta)" : undefined }}>{grupos[p.id].length}</div>
             </button>
@@ -424,7 +620,7 @@ export default function AppTerreno() {
         </div>
 
         {posicion && grupo !== "CERRADAS" && grupos[grupo].length > 1 && (
-          <div className="segmentos anim-aparecer" style={{ alignSelf: "flex-start" }}>
+          <div className="segmentos" style={{ alignSelf: "flex-start" }}>
             <button className={`segmento${!ordenCercania ? " activo" : ""}`} onClick={() => setOrdenCercania(false)}>Más urgentes</button>
             <button className={`segmento${ordenCercania ? " activo" : ""}`} onClick={() => setOrdenCercania(true)}>Más cercanas</button>
           </div>
@@ -438,8 +634,9 @@ export default function AppTerreno() {
             const cat = categoriaInfo(t.categoria?.nombre);
             const km = distanciaA(t);
             const urgente = prioridadDe(t) === "CRITICA" || slaDe(t, ahora).vencido;
+            const pendiente = pendientes.some(p => p.ticketId === t.id);
             return (
-              <button key={t.id} onClick={() => setActivoId(t.id)} className="item-lista anim-arriba" style={{ ["--color-item" as any]: cat.color, ["--i" as any]: i, padding: "14px 14px 14px 18px" }}>
+              <button key={t.id} onClick={() => setActivoId(t.id)} className="item-lista anim-arriba" style={{ ["--color-item" as any]: cat.color, ["--i" as any]: Math.min(i, 5), padding: "14px 14px 14px 18px" }}>
                 <div className="fila entre">
                   <span className="fila" style={{ gap: 10, minWidth: 0 }}>
                     <span style={{ width: 34, height: 34, background: cat.color, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icono nombre={cat.icono} size={18} /></span>
@@ -453,7 +650,10 @@ export default function AppTerreno() {
                 <div className="dos-lineas texto-2" style={{ fontSize: 12.5, marginTop: 8 }}>{t.analisisIA || resumenDescripcion(t.descripcionUsuario)}</div>
                 <div className="fila entre" style={{ marginTop: 10 }}>
                   <InsigniaPrioridad prioridad={prioridadDe(t)} />
-                  {urgente && t.estado !== "RESUELTO" ? <span className="fila" style={{ gap: 4, color: "var(--peligro)", fontSize: 11, fontWeight: 600 }}><FiAlertTriangle size={12} /> Urgente</span> : t.estado !== "RESUELTO" ? <IndicadorSla ticket={t} ahora={ahora} /> : <span className="texto-3" style={{ fontSize: 11 }}>Cerrado {horaCorta(t.updatedAt)}</span>}
+                  {pendiente ? <span className="fila" style={{ gap: 4, color: "var(--aviso)", fontSize: 11, fontWeight: 600 }}><FiUploadCloud size={12} /> Por enviar</span>
+                    : urgente && t.estado !== "RESUELTO" ? <span className="fila" style={{ gap: 4, color: "var(--peligro)", fontSize: 11, fontWeight: 600 }}><FiAlertTriangle size={12} /> Urgente</span>
+                    : t.estado !== "RESUELTO" ? <IndicadorSla ticket={t} ahora={ahora} />
+                    : <span className="texto-3" style={{ fontSize: 11 }}>Cerrado {horaCorta(t.updatedAt)}</span>}
                 </div>
               </button>
             );

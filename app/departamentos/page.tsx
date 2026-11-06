@@ -202,7 +202,11 @@ export default function ConsolaDepartamento() {
 
   const asignar = async (f: Operador) => {
     const ok = await actualizar({ nuevoEstado: "EN_REVISION", operadorAsignadoId: f.id }, `Asignado a ${f.nombre}`, f.id);
-    if (ok) { setResaltado(null); setPestana("POR_CONFIRMAR"); }
+    if (ok) {
+      setResaltado(null);
+      setPestana("POR_CONFIRMAR");
+      if (!f.enTurno) avisar({ titulo: `${f.nombre} está fuera de turno`, mensaje: "Verá la tarea cuando inicie su próximo turno.", tipo: "alerta", duracion: 7000 });
+    }
   };
 
   const confirmarModal = async () => {
@@ -215,11 +219,18 @@ export default function ConsolaDepartamento() {
 
   const funcionariosOrdenados = useMemo(() => {
     const t = detalle;
-    return funcionarios.map(f => {
+    const lista = funcionarios.map(f => {
       const km = t?.latitud != null && f.latitud != null ? distanciaKm(t.latitud, t.longitud!, f.latitud, f.longitud!) : null;
       const rechazo = t?.historial?.find(h => esRechazo(h) && h.operadorId === f.id);
       return { f, km, rechazo };
-    }).sort((a, b) => Number(b.f.gpsActivo) - Number(a.f.gpsActivo) || (a.km ?? 999) - (b.km ?? 999));
+    });
+    const urgente = t ? ["CRITICA", "ALTA"].includes(prioridadDe(t)) : false;
+    const carga = (f: Operador) => f._count?.ticketsAsignados ?? 0;
+    return lista.sort((a, b) =>
+      Number(!!b.f.enTurno) - Number(!!a.f.enTurno) ||
+      (urgente ? (a.km ?? 999) - (b.km ?? 999) : 0) ||
+      carga(a.f) - carga(b.f) ||
+      (a.km ?? 999) - (b.km ?? 999));
   }, [funcionarios, detalle]);
 
   const lineaDespacho = useMemo(() => {
@@ -236,6 +247,7 @@ export default function ConsolaDepartamento() {
       atrasados: activos.filter(t => slaDe(t, ahora).vencido).length,
       resueltosHoy: tickets.filter(t => t.estado === "RESUELTO" && new Date(t.updatedAt || 0).getTime() >= inicio.getTime()).length,
       gps: funcionarios.filter(f => f.gpsActivo).length,
+      enTurno: funcionarios.filter(f => f.enTurno).length,
     };
   }, [tickets, funcionarios, ahora]);
 
@@ -330,7 +342,7 @@ export default function ConsolaDepartamento() {
             { t: "En terreno", v: grupos.EN_TERRENO.length, c: "#7048E8", p: "EN_TERRENO" as Pestana },
             { t: "Fuera de plazo", v: metricas.atrasados, c: "var(--peligro)" },
             { t: "Resueltos hoy", v: metricas.resueltosHoy, c: "var(--ok)", p: "CERRADOS" as Pestana },
-            { t: "Funcionarios con GPS", v: metricas.gps, c: "var(--ok)", d: `de ${funcionarios.length} en el equipo` },
+            { t: "Funcionarios en turno", v: metricas.enTurno, c: "var(--ok)", d: `de ${funcionarios.length} | ${metricas.gps} comparten ubicación` },
           ].map((k, i) => (
             <button key={k.t} onClick={() => k.p && (setPestana(k.p), cerrarDetalle())} style={{ padding: 0, border: 0, background: "none", textAlign: "left" }}>
               <Kpi i={i} titulo={k.t} valor={k.v} color={k.c} detalle={k.d} />
@@ -356,7 +368,7 @@ export default function ConsolaDepartamento() {
                     <div className="columna" style={{ gap: 10 }}>
                       <div className="fila entre">
                         <span className="rotulo fila" style={{ gap: 6 }}><FiUsers size={12} /> {detalle.operadorAsignadoId ? "Reasignar funcionario" : "Asignar funcionario"}</span>
-                        <span className="texto-3" style={{ fontSize: 10.5 }}>Ordenados por GPS y distancia</span>
+                        <span className="texto-3" style={{ fontSize: 10.5 }}>{["CRITICA", "ALTA"].includes(prioridadDe(detalle)) ? "Urgente: en turno y más cercanos primero" : "En turno y con menos tareas primero"}</span>
                       </div>
                       <div className="desplazable columna" style={{ gap: 4, maxHeight: 230 }}>
                         {funcionariosOrdenados.length === 0 && <div className="vacio" style={{ padding: 14 }}>No hay funcionarios de terreno en {depto.nombre}.</div>}
@@ -366,7 +378,7 @@ export default function ConsolaDepartamento() {
                           return (
                             <div key={f.id} className="anim-arriba" onMouseEnter={() => setResaltado(f.id)} onMouseLeave={() => setResaltado(null)}
                               style={{ ["--i" as any]: i, display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", border: `1px solid ${asignado ? "var(--ok)" : resaltado === f.id ? "var(--acento)" : "var(--borde)"}`, background: asignado ? "var(--ok-suave)" : "var(--superficie)", transition: "border-color 0.15s" }}>
-                              <span className="mono" style={{ width: 30, height: 30, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", background: f.gpsActivo ? "var(--ok)" : "var(--superficie-3)", color: f.gpsActivo ? "#fff" : "var(--texto-2)", fontSize: 11, fontWeight: 600 }}>
+                              <span className="mono" style={{ width: 30, height: 30, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", background: f.enTurno ? "var(--ok)" : "var(--superficie-3)", color: f.enTurno ? "#fff" : "var(--texto-2)", fontSize: 11, fontWeight: 600 }}>
                                 {f.nombre.split(/\s+/).map(p => p[0]).join("").slice(0, 2).toUpperCase()}
                               </span>
                               <div className="crece">
@@ -375,13 +387,14 @@ export default function ConsolaDepartamento() {
                                   <div className="truncar" style={{ fontSize: 11, color: "var(--peligro)", fontWeight: 600 }}>Rechazó: {String(rechazo.comentario).replace(/^Rechazado por funcionario:\s*/, "")}</div>
                                 ) : (
                                   <div className="fila texto-3" style={{ fontSize: 11, gap: 8 }}>
-                                    <span style={{ color: f.gpsActivo ? "var(--ok)" : undefined, fontWeight: 600 }}>{f.gpsActivo ? "GPS activo" : "GPS apagado"}</span>
-                                    <span className="mono">{km != null ? `${km.toFixed(1)} km` : "--"}</span>
+                                    <span style={{ color: f.enTurno ? "var(--ok)" : undefined, fontWeight: 600 }}>{f.enTurno ? "En turno" : "Fuera de turno"}</span>
+                                    <span className="mono" title={f.gpsActivo ? "Distancia según su GPS" : "No comparte su ubicación"}>{km != null ? `${km.toFixed(1)} km` : "Sin ubicación"}</span>
                                     <span>{carga} tarea{carga === 1 ? "" : "s"}</span>
                                   </div>
                                 )}
                               </div>
-                              <button className={`btn btn-sm ${asignado ? "btn-ok" : "btn-primario"}`} disabled={!!procesando || asignado} onClick={() => asignar(f)}>
+                              <button className={`btn btn-sm ${asignado ? "btn-ok" : f.enTurno ? "btn-primario" : "btn-secundario"}`} disabled={!!procesando || asignado} onClick={() => asignar(f)}
+                                title={f.enTurno ? undefined : "Fuera de turno: verá la tarea al iniciar su próximo turno"}>
                                 {procesando === f.id ? <span className="girador" style={{ width: 12, height: 12 }} /> : asignado ? <FiCheck size={12} /> : <FiUserCheck size={12} />}
                                 {asignado ? "Asignado" : rechazo ? "Reintentar" : "Asignar"}
                               </button>
@@ -455,7 +468,7 @@ export default function ConsolaDepartamento() {
               onSeleccionar={seleccionar}
               seleccionadoId={seleccionadoId}
               enfoque={detalle && detalle.latitud != null && !lineaDespacho ? [detalle.latitud, detalle.longitud!] : null}
-              funcionarios={mostrarPersonal ? funcionarios : []}
+              funcionarios={mostrarPersonal ? funcionarios.filter(f => f.gpsActivo) : []}
               lineaDespacho={lineaDespacho}
             />
             <div style={{ position: "absolute", right: 12, bottom: 40, zIndex: 5 }}>

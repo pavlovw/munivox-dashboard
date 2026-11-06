@@ -15,7 +15,7 @@ interface Seguimiento {
   departamento: string | null;
   creado: string;
   actualizado: string;
-  etapas: { recibido: string; enRevision: string | null; asignado: string | null; enCamino: string | null; cerrado: string | null };
+  etapas: { recibido: string; enRevision: string | null; asignado: string | null; tomado?: string | null; enCamino: string | null; cerrado: string | null };
   informe: string | null;
   motivo: string | null;
   fotosCierre: string[];
@@ -25,7 +25,13 @@ interface Seguimiento {
 const EXPLICACION: Record<Seguimiento["estado"], { titulo: string; texto: (s: Seguimiento) => string; color: string }> = {
   PENDIENTE: { titulo: "Recibimos tu reporte", texto: () => "La central de la Municipalidad lo revisará y lo enviará al área que corresponde.", color: "#D9480F" },
   EN_REVISION: { titulo: "Tu reporte está en revisión", texto: s => `${s.departamento || "El área responsable"} está organizando la atención de tu caso.`, color: "#1D4ED8" },
-  DESPACHADO: { titulo: "Un funcionario va en camino", texto: s => `Personal de ${s.departamento || "la Municipalidad"} se dirige al lugar que indicaste.`, color: "#7048E8" },
+  DESPACHADO: {
+    titulo: "Un funcionario tomó tu caso",
+    texto: s => s.etapas.enCamino
+      ? `Personal de ${s.departamento || "la Municipalidad"} va en camino al lugar que indicaste.`
+      : `Personal de ${s.departamento || "la Municipalidad"} lo atenderá en los próximos días. Te avisaremos cuando vaya al lugar.`,
+    color: "#7048E8",
+  },
   RESUELTO: { titulo: "Tu caso fue resuelto", texto: () => "El equipo municipal informó que el problema fue atendido. Gracias por avisar.", color: "#2B8A3E" },
   DESCARTADO: { titulo: "Tu reporte fue cerrado", texto: () => "Este reporte se cerró sin intervención. Más abajo está el motivo.", color: "#6B7689" },
 };
@@ -165,15 +171,19 @@ export default function PaginaSeguimiento() {
 const botonLetra: React.CSSProperties = { minWidth: 40, height: 36, background: "transparent", border: "1px solid var(--marino-borde)", color: "#fff", fontWeight: 700, fontSize: 14 };
 
 function Resultado({ datos, base, onVolver }: { datos: Seguimiento; base: number; onVolver: () => void }) {
-  const e = EXPLICACION[datos.estado];
+  const e = datos.estado === "DESPACHADO" && datos.etapas.enCamino
+    ? { ...EXPLICACION.DESPACHADO, titulo: "Un funcionario va en camino" }
+    : EXPLICACION[datos.estado];
   const descartado = datos.estado === "DESCARTADO";
   const pasos = [
     { titulo: "Reporte recibido", fecha: datos.etapas.recibido },
     { titulo: "En revisión por el área responsable", fecha: datos.etapas.enRevision },
-    { titulo: "Funcionario asignado", fecha: datos.etapas.asignado },
-    { titulo: "Funcionario en camino", fecha: datos.etapas.enCamino },
-    { titulo: descartado ? "Reporte cerrado" : "Caso resuelto", fecha: datos.etapas.cerrado },
-  ].filter((p, i) => !(descartado && (i === 2 || i === 3) && !p.fecha));
+    { titulo: "Funcionario asignado", fecha: datos.etapas.asignado, opcional: descartado },
+    { titulo: "Un funcionario tomó tu caso", fecha: datos.etapas.tomado ?? null, opcional: descartado },
+    // "En camino" es opcional: solo aparece si el funcionario lo marcó
+    { titulo: "Funcionario en camino", fecha: datos.etapas.enCamino, opcional: true },
+    { titulo: descartado ? "Reporte cerrado" : "Caso resuelto", fecha: datos.etapas.cerrado, opcional: false },
+  ].filter(p => !p.opcional || p.fecha);
   const actual = pasos.reduce((ultimo, p, i) => (p.fecha ? i : ultimo), 0);
 
   return (

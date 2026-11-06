@@ -612,3 +612,15 @@ a { color: var(--acento); }
   .anim-arriba, .anim-aparecer, .kpi::after, .barra > span { animation: none !important; opacity: 1 !important; transform: none !important; }
   .avisos { display: none !important; }
 }
+
+/* ==========================================================================
+   APP TERRENO EN CELULARES MODESTOS
+   ========================================================================== */
+/* El navegador no dibuja las tarjetas que están fuera de la pantalla */
+.app-liviana .item-lista { content-visibility: auto; contain-intrinsic-size: auto 150px; }
+/* En pantallas táctiles no hay "hover": se evitan movimientos y sombras innecesarias */
+@media (hover: none) {
+  .item-lista:hover, .kpi:hover { transform: none; box-shadow: none; }
+  .item-lista:hover::before { width: 4px; }
+  .btn-primario::after, .btn-ok::after, .btn-oscuro::after { display: none; }
+}

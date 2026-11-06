@@ -272,6 +272,8 @@ const ACCIONES: Record<string, string> = {
   REGISTRAR_SOLICITUD: "Registro de solicitud de datos",
   RESOLVER_SOLICITUD: "Respuesta a solicitud de datos",
   RETENCION_AUTOMATICA: "Depuración automática por plazo",
+  INICIO_TURNO: "Inicio de turno en terreno",
+  FIN_TURNO: "Fin de turno en terreno",
 };
 
 export function Auditoria() {

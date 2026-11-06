@@ -19,6 +19,7 @@ export interface Operador {
   email: string;
   nombre: string;
   rol: Rol;
+  enTurno?: boolean;
   gpsActivo: boolean;
   latitud: number | null;
   longitud: number | null;

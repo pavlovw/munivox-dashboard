@@ -14,11 +14,11 @@ const Mapa = dynamic(() => import("./Map"), { ssr: false, loading: () => <div cl
 type Situacion = "EN_TAREA" | "POR_ACEPTAR" | "DISPONIBLE" | "SIN_SENAL" | "FUERA";
 
 const SITUACIONES: Record<Situacion, { etiqueta: string; color: string; descripcion: string }> = {
-  EN_TAREA:    { etiqueta: "En tarea",       color: "#7048E8", descripcion: "Va en camino o atiende un caso" },
-  POR_ACEPTAR: { etiqueta: "Por aceptar",    color: "#1D4ED8", descripcion: "Tiene tareas asignadas sin aceptar" },
-  DISPONIBLE:  { etiqueta: "Disponible",     color: "#2B8A3E", descripcion: "GPS activo y sin tareas" },
-  SIN_SENAL:   { etiqueta: "Sin señal",      color: "#D9480F", descripcion: "GPS activo, sin posición hace más de 15 min" },
-  FUERA:       { etiqueta: "Fuera de turno", color: "#6B7689", descripcion: "GPS apagado y sin tareas" },
+  EN_TAREA:    { etiqueta: "Con casos tomados", color: "#7048E8", descripcion: "En turno y con casos aceptados" },
+  POR_ACEPTAR: { etiqueta: "Por aceptar",       color: "#1D4ED8", descripcion: "Tiene tareas asignadas sin aceptar" },
+  DISPONIBLE:  { etiqueta: "Disponible",        color: "#2B8A3E", descripcion: "En turno y sin tareas" },
+  SIN_SENAL:   { etiqueta: "Sin señal",         color: "#D9480F", descripcion: "Comparte ubicación, sin posición hace más de 15 min" },
+  FUERA:       { etiqueta: "Fuera de turno",    color: "#6B7689", descripcion: "No ha iniciado turno" },
 };
 
 interface Props {
@@ -55,7 +55,9 @@ export default function EquiposTerreno({ tickets, ahora, onAbrirTicket }: Props)
     const enCamino = tareas.filter(t => t.estado === "DESPACHADO");
     const resueltosHoy = tickets.filter(t => t.operadorAsignadoId === f.id && t.estado === "RESUELTO" && (fechaCierre(t)?.getTime() || 0) >= inicioDia);
     const minutosSinPosicion = f.ultimaUbicacion ? (ahora - new Date(f.ultimaUbicacion).getTime()) / 60000 : Infinity;
-    const sit: Situacion = enCamino.length ? "EN_TAREA" : tareas.length ? "POR_ACEPTAR" : f.gpsActivo ? (minutosSinPosicion > 15 ? "SIN_SENAL" : "DISPONIBLE") : "FUERA";
+    const sit: Situacion = !f.enTurno ? "FUERA"
+      : f.gpsActivo && minutosSinPosicion > 15 ? "SIN_SENAL"
+      : enCamino.length ? "EN_TAREA" : tareas.length ? "POR_ACEPTAR" : "DISPONIBLE";
     return { f, tareas, enCamino, resueltosHoy: resueltosHoy.length, sit, minutosSinPosicion };
   }), [funcionarios, tickets, ahora, inicioDia]);
 
@@ -110,12 +112,12 @@ export default function EquiposTerreno({ tickets, ahora, onAbrirTicket }: Props)
                     <span className="insignia" style={{ color: s.color }}>{s.etiqueta}</span>
                   </div>
                   <div className="fila entre texto-2" style={{ marginTop: 8, fontSize: 11.5 }}>
-                    <span className="fila" style={{ gap: 4 }}><FiClock size={11} />{f.ultimaUbicacion && Number.isFinite(minutosSinPosicion) ? `Posición ${tiempoRelativo(f.ultimaUbicacion, ahora)}` : "Sin posición registrada"}</span>
+                    <span className="fila" style={{ gap: 4 }}><FiClock size={11} />{!f.gpsActivo ? "No comparte ubicación" : f.ultimaUbicacion && Number.isFinite(minutosSinPosicion) ? `Posición ${tiempoRelativo(f.ultimaUbicacion, ahora)}` : "Esperando posición"}</span>
                     <span className="mono">{tareas.length} activa{tareas.length === 1 ? "" : "s"} | {resueltosHoy} hoy</span>
                   </div>
                   {enCamino[0] && (
                     <div className="truncar" style={{ marginTop: 6, fontSize: 11.5, color: s.color, fontWeight: 600 }}>
-                      En camino a {enCamino[0].codigoTicket} | {categoriaInfo(enCamino[0].categoria?.nombre).nombre}
+                      A cargo de {enCamino[0].codigoTicket} | {categoriaInfo(enCamino[0].categoria?.nombre).nombre}
                     </div>
                   )}
                 </button>
@@ -131,7 +133,7 @@ export default function EquiposTerreno({ tickets, ahora, onAbrirTicket }: Props)
                     <button key={t.id} onClick={() => onAbrirTicket(t.id)} className="fila entre" style={{ border: "1px solid var(--borde)", background: "var(--superficie-2)", padding: "6px 10px", fontSize: 12 }}>
                       <span className="mono" style={{ fontWeight: 600 }}>{t.codigoTicket}</span>
                       <span className="truncar texto-2" style={{ margin: "0 8px" }}>{categoriaInfo(t.categoria?.nombre).nombre}</span>
-                      <span style={{ color: ESTADOS[t.estado].color, fontWeight: 600, fontSize: 11 }}>{t.estado === "DESPACHADO" ? "En camino" : "Por aceptar"}</span>
+                      <span style={{ color: ESTADOS[t.estado].color, fontWeight: 600, fontSize: 11 }}>{t.estado === "DESPACHADO" ? "Tomado" : "Por aceptar"}</span>
                     </button>
                   ))}
                 </div>
@@ -143,14 +145,14 @@ export default function EquiposTerreno({ tickets, ahora, onAbrirTicket }: Props)
         <div className="panel" style={{ flex: 1, minWidth: 0, position: "relative", overflow: "hidden" }}>
           <Mapa
             tickets={ticketsMapa}
-            funcionarios={visibles.map(x => x.f)}
+            funcionarios={visibles.map(x => x.f).filter(f => f.gpsActivo)}
             onSeleccionar={onAbrirTicket}
             enfoque={sel?.f.latitud != null && !tareaSel ? [sel.f.latitud, sel.f.longitud!] : null}
             lineaDespacho={sel?.f.latitud != null && tareaSel?.latitud != null ? { desde: [sel.f.latitud, sel.f.longitud!], hasta: [tareaSel.latitud, tareaSel.longitud!] } : null}
           />
           <div className="fila" style={{ position: "absolute", right: 12, bottom: 40, zIndex: 5, gap: 10, background: "rgba(255,255,255,.96)", border: "1px solid var(--borde)", padding: "6px 10px", fontSize: 11 }}>
             <span className="fila" style={{ gap: 4 }}><FiRadio size={12} color="var(--ok)" /> Con GPS</span>
-            <span className="fila" style={{ gap: 4 }}><FiWifiOff size={12} color="var(--texto-3)" /> Última posición conocida</span>
+            <span className="fila" style={{ gap: 4 }}><FiWifiOff size={12} color="var(--texto-3)" /> Quien no comparte ubicación no aparece</span>
             <span className="fila" style={{ gap: 4 }}><FiNavigation size={12} color="var(--acento)" /> Ruta a su tarea</span>
           </div>
         </div>

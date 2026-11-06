@@ -39,13 +39,28 @@ export function usePerfil(rolesPermitidos?: Rol[]) {
     if (!cache.has(email)) {
       cache.set(
         email,
-        api("/operadores/sincronizar", { method: "POST", body: JSON.stringify({}) }).then(async res => {
-          if (!res.ok) {
-            cache.delete(email);
-            throw new Error(await mensajeError(res, "No se pudo validar tu acceso"));
-          }
-          return res.json();
-        })
+        api("/operadores/sincronizar", { method: "POST", body: JSON.stringify({}) })
+          .then(async res => {
+            if (!res.ok) {
+              cache.delete(email);
+              throw new Error(await mensajeError(res, "No se pudo validar tu acceso"));
+            }
+            const p = await res.json();
+            try { localStorage.setItem(`munivox_perfil_${email}`, JSON.stringify(p)); } catch {}
+            return p;
+          })
+          .catch(e => {
+            // Sin señal: se usa el último perfil guardado en este equipo (app Terreno sin conexión)
+            if (e instanceof TypeError) {
+              cache.delete(email);
+              try {
+                const guardado = localStorage.getItem(`munivox_perfil_${email}`);
+                if (guardado) return JSON.parse(guardado);
+              } catch {}
+              throw new Error("Sin conexión. Conéctate a internet para ingresar por primera vez.");
+            }
+            throw e;
+          })
       );
     }
     cache

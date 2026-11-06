@@ -10,6 +10,6 @@ export default withAuth({
 export const config = {
   matcher: [
     "/",
-    "/((?!api/webhook|login|seguimiento|privacidad|iconos|apple-icon|manifest|icon|_next/static|_next/image|favicon.ico|.*\\.svg).*)",
+    "/((?!api/webhook|login|sw\\.js|seguimiento|privacidad|iconos|apple-icon|manifest|icon|_next/static|_next/image|favicon.ico|.*\\.svg).*)",
   ],
 };
