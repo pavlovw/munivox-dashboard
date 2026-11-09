@@ -60,6 +60,16 @@ export default function Mapa({
     mapaRef.current = mapa;
     if (!compacto) mapa.addControl(new mapboxgl.NavigationControl({ showCompass: true }), "bottom-right");
 
+    // Tamaño del camión de los funcionarios según el zoom: completo de cerca y más pequeño al alejarse,
+    // para que no tape varias cuadras ni parezca salirse de su calle (el tamaño en pantalla de un marcador
+    // de Mapbox no cambia con el zoom por sí solo).
+    const escalarFuncionarios = () => {
+      const escala = Math.min(1, Math.max(0.45, Math.pow(2, (mapa.getZoom() - 16) * 0.5)));
+      contenedor.current?.style.setProperty("--escala-funcionario", escala.toFixed(3));
+    };
+    escalarFuncionarios();
+    mapa.on("zoom", escalarFuncionarios);
+
     mapa.on("load", () => {
       const capas = mapa.getStyle().layers || [];
       const capaEtiquetas = capas.find(l => l.type === "symbol" && (l.layout as any)?.["text-field"])?.id;
