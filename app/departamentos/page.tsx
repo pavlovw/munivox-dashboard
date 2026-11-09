@@ -101,6 +101,21 @@ export default function ConsolaDepartamento() {
     if (seleccionRef.current) cargarDetalle(seleccionRef.current);
   }, 350);
 
+  // Las posiciones del personal cambian cada pocos segundos: solo se recarga la lista de funcionarios
+  const cargarPersonal = useCallback(async () => {
+    if (!deptoId) return;
+    try {
+      const rf = await api(`/operadores?departamentoId=${deptoId}&rol=TERRENO`);
+      if (rf.ok) {
+        const data: Operador[] = await rf.json();
+        setFuncionarios(prev => (JSON.stringify(prev) === JSON.stringify(data) ? prev : data));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, [api, deptoId]);
+  const recargarPersonal = useAgrupado(cargarPersonal, 300);
+
   // Al cambiar de departamento (solo la central puede) se parte de cero
   useEffect(() => {
     if (!deptoId) return;
@@ -113,7 +128,7 @@ export default function ConsolaDepartamento() {
   const { conectado, avisarCambio } = useTiempoReal({
     activo: !!perfil,
     onTicketCambio: e => { if (!e.departamentoId || e.departamentoId === deptoId) recargar(); },
-    onOperadoresCambio: e => { if (!e.departamentoId || e.departamentoId === deptoId) recargar(); },
+    onOperadoresCambio: e => { if (!e.departamentoId || e.departamentoId === deptoId) recargarPersonal(); },
   });
   useRefresco(cargar, conectado, !!perfil);
 

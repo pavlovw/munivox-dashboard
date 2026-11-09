@@ -8,6 +8,7 @@ import { DEPARTAMENTOS, categoriaInfo, departamentoInfo, fechaCierre, tiempoRela
 import { useApi, mensajeError } from "../lib/useApi";
 import { Kpi, Vacio, Esqueleto } from "./ui/Comunes";
 import { useAvisos } from "./ui/Avisos";
+import { useTiempoReal, useAgrupado } from "../lib/useTiempoReal";
 
 const Mapa = dynamic(() => import("./Map"), { ssr: false, loading: () => <div className="esqueleto" style={{ height: "100%" }} /> });
 
@@ -42,11 +43,16 @@ export default function EquiposTerreno({ tickets, ahora, onAbrirTicket }: Props)
     else avisar({ titulo: "No se pudo cargar el personal", mensaje: await mensajeError(res), tipo: "error" });
   }, [api, avisar]);
 
+  // Cada vez que un funcionario mueve su GPS llega un aviso y se recargan las posiciones
+  const recargar = useAgrupado(cargar, 300);
+  const { conectado } = useTiempoReal({ onOperadoresCambio: recargar, onTicketCambio: recargar });
+
   useEffect(() => {
     cargar();
-    const id = setInterval(cargar, 20000); // las posiciones cambian seguido
+    // Respaldo: cada 20 s sin tiempo real y cada 60 s con él
+    const id = setInterval(cargar, conectado ? 60000 : 20000);
     return () => clearInterval(id);
-  }, [cargar]);
+  }, [cargar, conectado]);
 
   const inicioDia = useMemo(() => { const d = new Date(ahora); d.setHours(0, 0, 0, 0); return d.getTime(); }, [ahora]);
 

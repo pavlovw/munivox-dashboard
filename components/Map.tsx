@@ -238,27 +238,85 @@ export default function Mapa({
   // --------------------------------------------------------------------------
   // FUNCIONARIOS EN TERRENO
   // --------------------------------------------------------------------------
+  // Los marcadores se conservan entre actualizaciones: al llegar una posición nueva, el marcador
+  // se desliza desde donde está hasta ella (en el tiempo que pasó desde la anterior), así el
+  // movimiento por la calle se ve continuo y no a saltos.
+  const marcadoresFunc = useRef(new Map<string, { marker: mapboxgl.Marker; el: HTMLDivElement; html: string; recibido: number; anim: number | null }>());
+
   useEffect(() => {
     const mapa = mapaRef.current;
     if (!mapa) return;
-    const lista = funcionarios.filter(f => f.latitud != null && f.longitud != null).map(f => {
+    const reducido = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const vigentes = new Set<string>();
+    const ahoraMs = performance.now();
+
+    funcionarios.filter(f => f.latitud != null && f.longitud != null).forEach(f => {
+      vigentes.add(f.id);
       const enLinea = f.gpsActivo;
-      const iniciales = f.nombre.split(/\s+/).map(p => p[0]).join("").slice(0, 2).toUpperCase();
-      const el = document.createElement("div");
-      el.className = `marcador-funcionario${enLinea ? " en-linea" : ""}`;
-      el.innerHTML = `${svgIcono("funcionario", 2.4)}<span>${escapar(iniciales)}</span>`;
+      // Solo el camión: carrocería blanca con contorno de color, sin recuadro ni iniciales
+      const html = `<svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">` +
+        `<path d="M2 6h12v10H2zM14 9h4l4 4v3h-8z" fill="#fff"/><path d="M5 19h3M16 19h3" fill="none"/></svg>`;
       const ultima = f.ultimaUbicacion ? `${tiempoRelativo(f.ultimaUbicacion)}` : "sin registro";
-      const popup = new mapboxgl.Popup({ offset: 18, maxWidth: "240px" }).setHTML(`
+      const htmlPopup = `
         <div style="padding:10px 12px;min-width:180px">
           <div style="font-weight:600;font-size:12.5px">${escapar(f.nombre)}</div>
           <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-top:4px;color:${enLinea ? "#2B8A3E" : "#7C889B"}">${enLinea ? "GPS activo" : "GPS apagado"}</div>
           <div style="font-size:11px;color:#7C889B;margin-top:2px">Última posición ${ultima}</div>
           <div style="font-size:11px;color:#46536A;margin-top:2px">${f._count?.ticketsAsignados ?? 0} tarea(s) activa(s)</div>
-        </div>`);
-      return new mapboxgl.Marker({ element: el }).setLngLat([f.longitud!, f.latitud!]).setPopup(popup).addTo(mapa);
+        </div>`;
+      const destino: [number, number] = [f.longitud!, f.latitud!];
+      const actual = marcadoresFunc.current.get(f.id);
+
+      if (!actual) {
+        const el = document.createElement("div");
+        el.className = `marcador-funcionario${enLinea ? " en-linea" : ""}`;
+        el.innerHTML = html;
+        el.title = f.nombre;
+        const popup = new mapboxgl.Popup({ offset: 18, maxWidth: "240px" }).setHTML(htmlPopup);
+        const marker = new mapboxgl.Marker({ element: el }).setLngLat(destino).setPopup(popup).addTo(mapa);
+        marcadoresFunc.current.set(f.id, { marker, el, html, recibido: ahoraMs, anim: null });
+        return;
+      }
+
+      // Estado y texto del popup sin recrear el marcador
+      actual.el.className = `marcador-funcionario${enLinea ? " en-linea" : ""}`;
+      if (actual.html !== html) { actual.el.innerHTML = html; actual.html = html; }
+      actual.marker.getPopup()?.setHTML(htmlPopup);
+
+      const desde = actual.marker.getLngLat();
+      const dLng = destino[0] - desde.lng, dLat = destino[1] - desde.lat;
+      if (Math.abs(dLng) < 1e-7 && Math.abs(dLat) < 1e-7) { actual.recibido = ahoraMs; return; }
+      if (actual.anim) cancelAnimationFrame(actual.anim);
+      // Saltos grandes (más de ~1,5 km) o movimiento reducido: sin animación
+      const lejos = Math.abs(dLng) > 0.015 || Math.abs(dLat) > 0.015;
+      const duracion = Math.min(Math.max(ahoraMs - actual.recibido, 600), 6000);
+      actual.recibido = ahoraMs;
+      if (reducido || lejos) { actual.marker.setLngLat(destino); actual.anim = null; return; }
+      const inicio = performance.now();
+      const paso = (t: number) => {
+        const k = Math.min((t - inicio) / duracion, 1);
+        actual.marker.setLngLat([desde.lng + dLng * k, desde.lat + dLat * k]);
+        actual.anim = k < 1 ? requestAnimationFrame(paso) : null;
+      };
+      actual.anim = requestAnimationFrame(paso);
     });
-    return () => lista.forEach(m => m.remove());
+
+    // Quien dejó de compartir ubicación sale del mapa
+    marcadoresFunc.current.forEach((m, id) => {
+      if (vigentes.has(id)) return;
+      if (m.anim) cancelAnimationFrame(m.anim);
+      m.marker.remove();
+      marcadoresFunc.current.delete(id);
+    });
   }, [funcionarios]);
+
+  useEffect(() => {
+    const registro = marcadoresFunc.current;
+    return () => {
+      registro.forEach(m => { if (m.anim) cancelAnimationFrame(m.anim); m.marker.remove(); });
+      registro.clear();
+    };
+  }, []);
 
   // --------------------------------------------------------------------------
   // LÍNEA DE DESPACHO

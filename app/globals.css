@@ -559,21 +559,17 @@ a { color: var(--acento); }
   z-index: 1;
 }
 .marcador-cercano { width: 22px; height: 22px; border: 2px dashed var(--alerta); background: rgba(217, 72, 15, 0.12); cursor: pointer; }
+/* Funcionario en terreno: solo un camión, sin recuadro ni animación.
+   Verde con GPS activo, marino sin GPS; el halo blanco lo separa del mapa. */
 .marcador-funcionario {
   display: flex; align-items: center; justify-content: center;
-  min-width: 34px; height: 26px; padding: 0 6px; gap: 4px;
-  background: var(--marino); color: #fff; border: 2px solid #fff;
-  font-family: var(--mono); font-size: 10px; font-weight: 600;
-  box-shadow: 0 6px 14px -4px rgba(10, 18, 34, 0.55);
+  width: 30px; height: 30px;
+  color: var(--marino);
   cursor: pointer;
-  position: relative;
+  filter: drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff) drop-shadow(0 2px 3px rgba(10, 18, 34, 0.45));
 }
-.marcador-funcionario.en-linea { background: var(--ok); }
-.marcador-funcionario.en-linea::before {
-  content: ""; position: absolute; inset: -2px; border: 2px solid var(--ok);
-  animation: anilloCuadrado 2s ease-out infinite;
-}
-.marcador-funcionario svg { width: 12px; height: 12px; }
+.marcador-funcionario.en-linea { color: var(--ok); }
+.marcador-funcionario svg { width: 28px; height: 28px; }
 
 /* ==========================================================================
    UTILIDADES
