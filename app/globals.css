@@ -559,18 +559,7 @@ a { color: var(--acento); }
   z-index: 1;
 }
 .marcador-cercano { width: 22px; height: 22px; border: 2px dashed var(--alerta); background: rgba(217, 72, 15, 0.12); cursor: pointer; }
-/* Funcionario en terreno: solo un camión, sin recuadro ni animación.
-   Verde con GPS activo, marino sin GPS; el halo blanco lo separa del mapa. */
-/* El tamaño sigue al zoom (--escala-funcionario lo fija Map.tsx): de cerca 28 px, al alejarse hasta 13 px */
-.marcador-funcionario {
-  display: flex; align-items: center; justify-content: center;
-  width: calc(30px * var(--escala-funcionario, 1)); height: calc(30px * var(--escala-funcionario, 1));
-  color: var(--marino);
-  cursor: pointer;
-  filter: drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff) drop-shadow(0 2px 3px rgba(10, 18, 34, 0.45));
-}
-.marcador-funcionario.en-linea { color: var(--ok); }
-.marcador-funcionario svg { width: calc(28px * var(--escala-funcionario, 1)); height: calc(28px * var(--escala-funcionario, 1)); }
+/* Los funcionarios en terreno se dibujan como capa del mapa (capa "funcionarios" en Map.tsx), no con CSS */
 
 /* ==========================================================================
    UTILIDADES
