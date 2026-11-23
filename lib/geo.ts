@@ -84,6 +84,18 @@ export function unidadVecinalDe(lat?: number | null, lng?: number | null): strin
   return nombre;
 }
 
+const cacheId = new Map<string, string | null>();
+
+/** Id de la unidad vecinal que contiene el punto ("1" a "19"), o null si no cae en ninguna */
+export function idUnidadVecinalDe(lat?: number | null, lng?: number | null): string | null {
+  if (lat == null || lng == null) return null;
+  const clave = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+  if (cacheId.has(clave)) return cacheId.get(clave)!;
+  const id = UNIDADES_VECINALES.find(u => dentroDe(lng, lat, u.data))?.id ?? null;
+  cacheId.set(clave, id);
+  return id;
+}
+
 export function distanciaKm(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;

@@ -576,20 +576,17 @@ a { color: var(--acento); }
 .marcador-cercano { width: 22px; height: 22px; border: 2px dashed var(--alerta); background: rgba(217, 72, 15, 0.12); cursor: pointer; }
 
 /* Reportes agrupados por unidad vecinal (vista de todos los estados o de resueltos) */
-.burbuja { position: relative; width: var(--lado, 48px); height: var(--lado, 48px); cursor: pointer; }
+.burbuja { --color-grupo: #7048E8; position: relative; width: var(--lado, 44px); height: var(--lado, 44px); cursor: pointer; }
 .burbuja-cuerpo {
   position: absolute; inset: 0;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  background: var(--marino); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-grupo); color: #fff;
   border: 2px solid #fff;
-  box-shadow: 0 0 0 6px rgba(10, 18, 34, 0.14), 0 10px 22px -8px rgba(10, 18, 34, 0.7);
-  transition: transform var(--rapido) var(--curva), box-shadow var(--rapido) ease, background var(--rapido) ease;
+  box-shadow: 0 0 0 5px rgba(112, 72, 232, 0.22), 0 10px 20px -8px rgba(10, 18, 34, 0.7);
+  transition: transform var(--rapido) var(--curva), box-shadow var(--rapido) ease;
 }
-.burbuja-numero { font-family: var(--mono); font-weight: 700; font-size: calc(var(--lado, 48px) * 0.3); line-height: 1; }
-.burbuja-uv { font-size: 9px; font-weight: 700; letter-spacing: .08em; color: #9FB0CC; margin-top: 3px; }
-.burbuja-barra { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; display: flex; }
-.burbuja-barra i { display: block; height: 100%; }
-.burbuja:hover .burbuja-cuerpo { transform: scale(1.1); background: var(--acento); box-shadow: 0 0 0 8px rgba(29, 78, 216, 0.22), 0 14px 26px -8px rgba(10, 18, 34, 0.7); }
+.burbuja-numero { font-family: var(--mono); font-weight: 700; font-size: calc(var(--lado, 44px) * 0.36); line-height: 1; }
+.burbuja:hover .burbuja-cuerpo { transform: scale(1.12); box-shadow: 0 0 0 8px rgba(112, 72, 232, 0.3), 0 14px 24px -8px rgba(10, 18, 34, 0.7); }
 .burbuja-ficha {
   position: absolute; left: 50%; bottom: calc(100% + 12px); transform: translate(-50%, 6px);
   display: flex; flex-direction: column; gap: 2px; white-space: nowrap;
@@ -608,8 +605,8 @@ a { color: var(--acento); }
 @keyframes burbujaEntra { 0% { opacity: 0; transform: scale(0.3); } 65% { opacity: 1; transform: scale(1.12); } 100% { transform: none; } }
 @keyframes burbujaAbre {
   0% { transform: scale(1.1); }
-  35% { transform: scale(1.3); background: var(--acento); box-shadow: 0 0 0 16px rgba(29, 78, 216, 0.25); }
-  100% { transform: scale(1.3); background: var(--acento); box-shadow: 0 0 0 26px rgba(29, 78, 216, 0); }
+  35% { transform: scale(1.3); box-shadow: 0 0 0 16px rgba(112, 72, 232, 0.3); }
+  100% { opacity: 0; transform: scale(1.5); box-shadow: 0 0 0 28px rgba(112, 72, 232, 0); }
 }
 @keyframes burbujaSale { to { opacity: 0; transform: scale(0.2); } }
 

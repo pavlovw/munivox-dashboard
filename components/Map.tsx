@@ -7,7 +7,7 @@ import { FiLayers, FiCrosshair, FiChevronDown, FiChevronUp } from "react-icons/f
 
 import type { Ticket, Operador } from "../lib/tipos";
 import { categoriaInfo, CATEGORIAS, ESTADOS, prioridadDe, slaDe, tiempoRelativo, ESTADOS_ACTIVOS } from "../lib/constantes";
-import { LIMITE_BUIN, UNIDADES_VECINALES, CENTRO_BUIN, unidadVecinalDe } from "../lib/geo";
+import { LIMITE_BUIN, UNIDADES_VECINALES, CENTRO_BUIN, idUnidadVecinalDe } from "../lib/geo";
 import { svgIcono } from "./ui/Iconos";
 import { useUltimo } from "../lib/hooks";
 
@@ -119,7 +119,7 @@ export default function Mapa({
   // Unidad vecinal de cada reporte (para agrupar)
   const uvDeTicket = useMemo(() => {
     const m = new Map<string, string | null>();
-    if (agrupar) tickets.forEach(t => m.set(t.id, unidadVecinalDe(t.latitud, t.longitud)));
+    if (agrupar) tickets.forEach(t => m.set(t.id, idUnidadVecinalDe(t.latitud, t.longitud)));
     return m;
   }, [tickets, agrupar]);
 
@@ -355,7 +355,7 @@ export default function Mapa({
       // Centro: promedio de los reportes del sector (queda donde están los problemas, no en medio del campo)
       const centro: [number, number] = [lista.reduce((a, t) => a + t.longitud!, 0) / lista.length, lista.reduce((a, t) => a + t.latitud!, 0) / lista.length];
       const uv = UNIDADES_VECINALES.find(x => x.id === u);
-      const lado = Math.round(Math.min(40 + Math.sqrt(lista.length) * 3.2, 74));
+      const lado = Math.round(Math.min(34 + Math.sqrt(lista.length) * 2.6, 58));
       const el = document.createElement("div");
       el.className = `burbuja${existente ? "" : " nueva"}`;
       el.style.setProperty("--lado", `${lado}px`);
@@ -363,11 +363,7 @@ export default function Mapa({
       el.setAttribute("role", "button");
       el.setAttribute("aria-label", `UV ${u} ${uv?.nombre || ""}: ${lista.length} reportes. Abrir sector`);
       el.innerHTML = `
-        <div class="burbuja-cuerpo">
-          <span class="burbuja-numero">${lista.length}</span>
-          <span class="burbuja-uv">UV ${escapar(u)}</span>
-          <span class="burbuja-barra">${activos ? `<i style="flex:${activos};background:#E8590C"></i>` : ""}${resueltos ? `<i style="flex:${resueltos};background:#2B8A3E"></i>` : ""}${otros ? `<i style="flex:${otros};background:#7C889B"></i>` : ""}</span>
-        </div>
+        <div class="burbuja-cuerpo"><span class="burbuja-numero">${lista.length}</span></div>
         <div class="burbuja-ficha">
           <strong>UV ${escapar(u)} | ${escapar(uv?.nombre || "")}</strong>
           <span>${lista.length} reporte(s)${activos ? ` | ${activos} activo(s)` : ""}${resueltos ? ` | ${resueltos} resuelto(s)` : ""}${otros ? ` | ${otros} descartado(s)` : ""}</span>
