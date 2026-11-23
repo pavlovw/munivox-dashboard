@@ -487,6 +487,7 @@ export default function ConsolaDepartamento() {
               enfoque={detalle && detalle.latitud != null && !lineaDespacho ? [detalle.latitud, detalle.longitud!] : null}
               funcionarios={mostrarPersonal ? funcionarios.filter(f => f.gpsActivo) : []}
               lineaDespacho={lineaDespacho}
+              agrupar={pestana === "CERRADOS" && !detalle}
             />
             <div style={{ position: "absolute", right: 12, bottom: 40, zIndex: 5 }}>
               <button className={`btn btn-sm ${mostrarPersonal ? "btn-oscuro" : "btn-secundario"}`} onClick={() => setMostrarPersonal(!mostrarPersonal)}>

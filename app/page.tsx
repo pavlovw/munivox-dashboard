@@ -483,6 +483,7 @@ export default function CentralC4() {
                     seleccionadoId={seleccionadoId}
                     enfoque={detalle && detalle.latitud != null ? [detalle.latitud, detalle.longitud!] : null}
                     cercanos={cercanos}
+                    agrupar={filtroEstado === "TODOS" || filtroEstado === "RESUELTO"}
                   />
                 </div>
 

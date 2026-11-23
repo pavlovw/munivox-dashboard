@@ -476,7 +476,22 @@ a { color: var(--acento); }
 
 /* Visor de imágenes */
 .visor { position: fixed; inset: 0; z-index: 1200; background: rgba(5, 9, 18, 0.92); display: flex; align-items: center; justify-content: center; padding: 40px; animation: aparecer 200ms ease both; }
-.visor img { max-height: 100%; max-width: 100%; object-fit: contain; animation: escalar 260ms var(--curva) both; border: 1px solid #2a3550; }
+.visor { cursor: zoom-out; padding: 64px 80px; }
+.visor img { max-height: 100%; max-width: 100%; object-fit: contain; animation: escalar 260ms var(--curva) both; border: 1px solid #2a3550; cursor: default; box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.8); }
+.visor-boton {
+  position: absolute; width: 46px; height: 46px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.08); color: #fff; border: 1px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer; transition: background var(--rapido) ease, border-color var(--rapido) ease, transform var(--rapido) var(--curva);
+  animation: aparecer 300ms ease both;
+}
+.visor-boton:hover { background: rgba(255, 255, 255, 0.2); border-color: #fff; }
+.visor-cerrar { top: 16px; right: 16px; }
+.visor-cerrar:hover { transform: rotate(90deg); }
+.visor-anterior { left: 16px; top: 50%; margin-top: -23px; }
+.visor-siguiente { right: 16px; top: 50%; margin-top: -23px; }
+.visor-contador { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); color: #9FB0CC; font-size: 12px; letter-spacing: .08em; }
+@media (max-width: 640px) { .visor { padding: 64px 12px; } .visor-anterior, .visor-siguiente { top: auto; bottom: 12px; margin-top: 0; } }
 
 /* ==========================================================================
    NAVEGACIÓN LATERAL (C4)
@@ -559,6 +574,57 @@ a { color: var(--acento); }
   z-index: 1;
 }
 .marcador-cercano { width: 22px; height: 22px; border: 2px dashed var(--alerta); background: rgba(217, 72, 15, 0.12); cursor: pointer; }
+
+/* Reportes agrupados por unidad vecinal (vista de todos los estados o de resueltos) */
+.burbuja { position: relative; width: var(--lado, 48px); height: var(--lado, 48px); cursor: pointer; }
+.burbuja-cuerpo {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: var(--marino); color: #fff;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 6px rgba(10, 18, 34, 0.14), 0 10px 22px -8px rgba(10, 18, 34, 0.7);
+  transition: transform var(--rapido) var(--curva), box-shadow var(--rapido) ease, background var(--rapido) ease;
+}
+.burbuja-numero { font-family: var(--mono); font-weight: 700; font-size: calc(var(--lado, 48px) * 0.3); line-height: 1; }
+.burbuja-uv { font-size: 9px; font-weight: 700; letter-spacing: .08em; color: #9FB0CC; margin-top: 3px; }
+.burbuja-barra { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; display: flex; }
+.burbuja-barra i { display: block; height: 100%; }
+.burbuja:hover .burbuja-cuerpo { transform: scale(1.1); background: var(--acento); box-shadow: 0 0 0 8px rgba(29, 78, 216, 0.22), 0 14px 26px -8px rgba(10, 18, 34, 0.7); }
+.burbuja-ficha {
+  position: absolute; left: 50%; bottom: calc(100% + 12px); transform: translate(-50%, 6px);
+  display: flex; flex-direction: column; gap: 2px; white-space: nowrap;
+  padding: 8px 10px; background: #fff; color: var(--texto); border: 1px solid var(--borde); box-shadow: var(--sombra-2);
+  font-size: 11px; opacity: 0; pointer-events: none;
+  transition: opacity var(--rapido) ease, transform var(--rapido) var(--curva);
+}
+.burbuja-ficha strong { font-size: 12px; }
+.burbuja-ficha em { font-style: normal; color: var(--acento); font-weight: 600; }
+.burbuja:hover { z-index: 3; }
+.burbuja:hover .burbuja-ficha { opacity: 1; transform: translate(-50%, 0); }
+.burbuja.nueva .burbuja-cuerpo { animation: burbujaEntra 480ms var(--curva) both; animation-delay: calc(var(--i, 0) * 30ms); }
+.burbuja.abriendo .burbuja-cuerpo { animation: burbujaAbre 600ms var(--curva) both; }
+.burbuja.abriendo .burbuja-ficha, .burbuja.saliendo .burbuja-ficha { display: none; }
+.burbuja.saliendo .burbuja-cuerpo { animation: burbujaSale 260ms ease both; }
+@keyframes burbujaEntra { 0% { opacity: 0; transform: scale(0.3); } 65% { opacity: 1; transform: scale(1.12); } 100% { transform: none; } }
+@keyframes burbujaAbre {
+  0% { transform: scale(1.1); }
+  35% { transform: scale(1.3); background: var(--acento); box-shadow: 0 0 0 16px rgba(29, 78, 216, 0.25); }
+  100% { transform: scale(1.3); background: var(--acento); box-shadow: 0 0 0 26px rgba(29, 78, 216, 0); }
+}
+@keyframes burbujaSale { to { opacity: 0; transform: scale(0.2); } }
+
+/* Reportes que salen de la burbuja hacia su ubicación */
+.marcador.desplegado .marcador-cuerpo { animation: desplegar 620ms var(--curva) both; animation-delay: calc(var(--i, 0) * 14ms); }
+.marcador.desplegado::after { animation: aparecer 200ms ease both; animation-delay: calc(420ms + var(--i, 0) * 14ms); }
+@keyframes desplegar {
+  0% { opacity: 0; transform: translate(var(--dx, 0), var(--dy, 0)) scale(0.25); }
+  20% { opacity: 1; }
+  80% { transform: translate(0, -4px) scale(1.06); }
+  100% { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .burbuja.nueva .burbuja-cuerpo, .burbuja.abriendo .burbuja-cuerpo, .marcador.desplegado .marcador-cuerpo, .marcador.desplegado::after { animation: none; }
+}
 /* Los funcionarios en terreno se dibujan como capa del mapa (capa "funcionarios" en Map.tsx), no con CSS */
 
 /* ==========================================================================

@@ -7,7 +7,7 @@ import { FiLayers, FiCrosshair, FiChevronDown, FiChevronUp } from "react-icons/f
 
 import type { Ticket, Operador } from "../lib/tipos";
 import { categoriaInfo, CATEGORIAS, ESTADOS, prioridadDe, slaDe, tiempoRelativo, ESTADOS_ACTIVOS } from "../lib/constantes";
-import { LIMITE_BUIN, UNIDADES_VECINALES, CENTRO_BUIN } from "../lib/geo";
+import { LIMITE_BUIN, UNIDADES_VECINALES, CENTRO_BUIN, unidadVecinalDe } from "../lib/geo";
 import { svgIcono } from "./ui/Iconos";
 import { useUltimo } from "../lib/hooks";
 
@@ -23,6 +23,8 @@ interface MapProps {
   lineaDespacho?: { desde: [number, number]; hasta: [number, number] } | null; // [lat, lng]
   compacto?: boolean;
   zoomEnfoque?: number;
+  /** Agrupa los reportes en una burbuja por unidad vecinal; al abrir una, se despliegan sus reportes */
+  agrupar?: boolean;
 }
 
 /** Distancia aproximada en metros entre dos puntos [lng, lat] */
@@ -57,12 +59,15 @@ function cargarCamion(mapa: mapboxgl.Map, nombre: string, color: string) {
 const escapar = (s: string) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
 export default function Mapa({
-  tickets, onSeleccionar, seleccionadoId, enfoque, cercanos = [], funcionarios = [], lineaDespacho, compacto = false, zoomEnfoque = 16,
+  tickets, onSeleccionar, seleccionadoId, enfoque, cercanos = [], funcionarios = [], lineaDespacho, compacto = false, zoomEnfoque = 16, agrupar = false,
 }: MapProps) {
   const contenedor = useRef<HTMLDivElement>(null);
   const mapaRef = useRef<mapboxgl.Map | null>(null);
   const marcadores = useRef(new Map<string, { marker: mapboxgl.Marker; el: HTMLDivElement; firma: string }>());
   const primeraCarga = useRef(true);
+  const burbujas = useRef(new Map<string, { marker: mapboxgl.Marker; el: HTMLDivElement; firma: string }>());
+  // Punto desde donde "salen" los reportes al abrir una burbuja (en coordenadas del mapa)
+  const origenDespliegue = useRef<{ uv: string; centro: [number, number] } | null>(null);
   const onSeleccionarRef = useUltimo(onSeleccionar);
 
   // Posición dibujada de cada funcionario (para avanzar y girar suavemente) y cuadro de animación en curso
@@ -109,6 +114,14 @@ export default function Mapa({
   const [calor, setCalor] = useState(false);
   const [modo3D, setModo3D] = useState(false);
   const [leyendaAbierta, setLeyendaAbierta] = useState(!compacto);
+  const [uvAbierta, setUvAbierta] = useState<string | null>(null);
+
+  // Unidad vecinal de cada reporte (para agrupar)
+  const uvDeTicket = useMemo(() => {
+    const m = new Map<string, string | null>();
+    if (agrupar) tickets.forEach(t => m.set(t.id, unidadVecinalDe(t.latitud, t.longitud)));
+    return m;
+  }, [tickets, agrupar]);
 
   // --------------------------------------------------------------------------
   // INICIALIZACIÓN
@@ -230,6 +243,8 @@ export default function Mapa({
       clearInterval(animacion);
       actuales.forEach(m => m.marker.remove());
       actuales.clear();
+      burbujas.current.forEach(b => b.marker.remove());
+      burbujas.current.clear();
       mapa.remove();
       mapaRef.current = null;
     };
@@ -246,7 +261,15 @@ export default function Mapa({
     const vigentes = new Set<string>();
     let indiceNuevo = 0;
 
-    tickets.forEach(t => {
+    // Agrupado: solo se dibujan sueltos los reportes de la UV abierta, el seleccionado y los que no caen en ninguna UV
+    const sueltos = agrupar
+      ? tickets.filter(t => { const u = uvDeTicket.get(t.id); return !u || u === uvAbierta || t.id === seleccionadoId; })
+      : tickets;
+    const origen = origenDespliegue.current && origenDespliegue.current.uv === uvAbierta ? mapa.project(origenDespliegue.current.centro) : null;
+    if (origen) origenDespliegue.current = null;
+    let indiceDespliegue = 0;
+
+    sueltos.forEach(t => {
       if (t.latitud == null || t.longitud == null) return;
       vigentes.add(t.id);
       const cat = categoriaInfo(t.categoria?.nombre);
@@ -260,8 +283,17 @@ export default function Mapa({
       if (existente) { existente.marker.remove(); marcadores.current.delete(t.id); }
 
       const el = document.createElement("div");
-      el.className = `marcador${urgente ? " urgente" : ""}${activo ? "" : " apagado"}${primeraCarga.current || existente ? "" : " nuevo"}`;
-      if (primeraCarga.current) { el.classList.add("nuevo"); el.style.setProperty("--i", String(Math.min(indiceNuevo++, 30))); }
+      const desplegado = !!origen && !existente && uvDeTicket.get(t.id) === uvAbierta;
+      el.className = `marcador${urgente ? " urgente" : ""}${activo ? "" : " apagado"}${primeraCarga.current || existente || desplegado ? "" : " nuevo"}`;
+      if (primeraCarga.current && !desplegado) { el.classList.add("nuevo"); el.style.setProperty("--i", String(Math.min(indiceNuevo++, 30))); }
+      if (desplegado) {
+        // Sale desde el centro de la burbuja hacia su ubicación real
+        const p = mapa.project([t.longitud, t.latitud]);
+        el.classList.add("desplegado");
+        el.style.setProperty("--dx", `${origen!.x - p.x}px`);
+        el.style.setProperty("--dy", `${origen!.y - p.y + 24}px`);
+        el.style.setProperty("--i", String(Math.min(indiceDespliegue++, 40)));
+      }
       el.style.setProperty("--color-marcador", cat.color);
       el.style.setProperty("--color-urgente", prio === "CRITICA" ? "#C92A2A" : "#E8590C");
       el.innerHTML = `<div class="marcador-cuerpo">${svgIcono(cat.icono)}</div>`;
@@ -301,6 +333,64 @@ export default function Mapa({
     marcadores.current.forEach((m, id) => {
       if (!vigentes.has(id)) { m.marker.remove(); marcadores.current.delete(id); }
     });
+
+    // Burbujas por unidad vecinal (una por cada UV que no está abierta)
+    const grupos = new Map<string, Ticket[]>();
+    if (agrupar) tickets.forEach(t => {
+      const u = uvDeTicket.get(t.id);
+      if (!u || u === uvAbierta || t.latitud == null || t.longitud == null) return;
+      if (!grupos.has(u)) grupos.set(u, []);
+      grupos.get(u)!.push(t);
+    });
+    let indiceBurbuja = 0;
+    grupos.forEach((lista, u) => {
+      const activos = lista.filter(t => ESTADOS_ACTIVOS.includes(t.estado)).length;
+      const resueltos = lista.filter(t => t.estado === "RESUELTO").length;
+      const otros = lista.length - activos - resueltos;
+      const firma = [lista.length, activos, resueltos].join("|");
+      const existente = burbujas.current.get(u);
+      if (existente && existente.firma === firma) return;
+      existente?.marker.remove();
+
+      // Centro: promedio de los reportes del sector (queda donde están los problemas, no en medio del campo)
+      const centro: [number, number] = [lista.reduce((a, t) => a + t.longitud!, 0) / lista.length, lista.reduce((a, t) => a + t.latitud!, 0) / lista.length];
+      const uv = UNIDADES_VECINALES.find(x => x.id === u);
+      const lado = Math.round(Math.min(40 + Math.sqrt(lista.length) * 3.2, 74));
+      const el = document.createElement("div");
+      el.className = `burbuja${existente ? "" : " nueva"}`;
+      el.style.setProperty("--lado", `${lado}px`);
+      el.style.setProperty("--i", String(Math.min(indiceBurbuja++, 19)));
+      el.setAttribute("role", "button");
+      el.setAttribute("aria-label", `UV ${u} ${uv?.nombre || ""}: ${lista.length} reportes. Abrir sector`);
+      el.innerHTML = `
+        <div class="burbuja-cuerpo">
+          <span class="burbuja-numero">${lista.length}</span>
+          <span class="burbuja-uv">UV ${escapar(u)}</span>
+          <span class="burbuja-barra">${activos ? `<i style="flex:${activos};background:#E8590C"></i>` : ""}${resueltos ? `<i style="flex:${resueltos};background:#2B8A3E"></i>` : ""}${otros ? `<i style="flex:${otros};background:#7C889B"></i>` : ""}</span>
+        </div>
+        <div class="burbuja-ficha">
+          <strong>UV ${escapar(u)} | ${escapar(uv?.nombre || "")}</strong>
+          <span>${lista.length} reporte(s)${activos ? ` | ${activos} activo(s)` : ""}${resueltos ? ` | ${resueltos} resuelto(s)` : ""}${otros ? ` | ${otros} descartado(s)` : ""}</span>
+          <em>Clic para ver los reportes del sector</em>
+        </div>`;
+      el.addEventListener("click", ev => {
+        ev.stopPropagation();
+        el.classList.add("abriendo");
+        origenDespliegue.current = { uv: u, centro };
+        setUvId(u);
+      });
+      const marker = new mapboxgl.Marker({ element: el, anchor: "center" }).setLngLat(centro).addTo(mapa);
+      burbujas.current.set(u, { marker, el, firma });
+    });
+    burbujas.current.forEach((b, u) => {
+      if (grupos.has(u)) return;
+      // Se encoge antes de quitarla
+      b.el.classList.add("saliendo");
+      const m = b.marker;
+      setTimeout(() => m.remove(), 280);
+      burbujas.current.delete(u);
+    });
+    if (calor) burbujas.current.forEach(b => (b.el.style.visibility = "hidden"));
     if (tickets.length) primeraCarga.current = false;
 
     // Datos del mapa de calor (los activos pesan más)
@@ -312,7 +402,7 @@ export default function Mapa({
         geometry: { type: "Point", coordinates: [t.longitud!, t.latitud!] },
       })),
     } as any);
-  }, [tickets, listo, onSeleccionarRef]);
+  }, [tickets, listo, onSeleccionarRef, agrupar, uvAbierta, uvDeTicket, seleccionadoId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Resalta el seleccionado
   useEffect(() => {
@@ -416,13 +506,19 @@ export default function Mapa({
     if (!mapa || !listo) return;
     const uv = UNIDADES_VECINALES.find(u => u.id === uvId);
     (mapa.getSource("uv-sel") as mapboxgl.GeoJSONSource)?.setData(uv ? uv.data : { type: "FeatureCollection", features: [] });
-    if (uv) {
-      const b = new mapboxgl.LngLatBounds();
-      const geom = uv.data.geometry || uv.data.features?.[0]?.geometry;
-      const anillos = geom?.type === "MultiPolygon" ? geom.coordinates.flat() : geom?.coordinates || [];
-      anillos.forEach((a: [number, number][]) => a.forEach(p => b.extend(p)));
-      if (!b.isEmpty()) mapa.fitBounds(b, { padding: 60, duration: 1000 });
-    }
+    if (!uv) { setUvAbierta(null); return; }
+    const b = new mapboxgl.LngLatBounds();
+    const geom = uv.data.geometry || uv.data.features?.[0]?.geometry;
+    const anillos = geom?.type === "MultiPolygon" ? geom.coordinates.flat() : geom?.coordinates || [];
+    anillos.forEach((a: [number, number][]) => a.forEach(p => b.extend(p)));
+    if (b.isEmpty()) { setUvAbierta(uv.id); return; }
+    // Los reportes se despliegan cuando el mapa termina de acercarse (así salen de la burbuja ya en su lugar)
+    let hecho = false;
+    const abrir = () => { if (hecho) return; hecho = true; setUvAbierta(uv.id); };
+    mapa.once("moveend", abrir);
+    const respaldo = setTimeout(abrir, 1300);
+    mapa.fitBounds(b, { padding: 60, duration: 1000 });
+    return () => { clearTimeout(respaldo); mapa.off("moveend", abrir); };
   }, [uvId, listo]);
 
   useEffect(() => {
@@ -436,6 +532,7 @@ export default function Mapa({
     if (!mapa || !listo) return;
     mapa.setLayoutProperty("calor", "visibility", calor ? "visible" : "none");
     marcadores.current.forEach(m => (m.el.style.visibility = calor ? "hidden" : "visible"));
+    burbujas.current.forEach(b => (b.el.style.visibility = calor ? "hidden" : "visible"));
   }, [calor, listo, tickets]);
 
   const alternar3D = () => {
@@ -495,6 +592,15 @@ export default function Mapa({
               <button key={b.id} onClick={b.accion} className={`segmento${b.activo ? " activo" : ""}`} style={{ height: 34 }}>{b.etiqueta}</button>
             ))}
           </div>
+
+          {/* Sector abierto (modo agrupado) */}
+          {agrupar && uvAbierta && (
+            <div key={uvAbierta} className="anim-arriba" style={{ ...estiloFlotante, top: 56, left: 12, display: "flex", alignItems: "center", gap: 10, padding: "6px 6px 6px 12px", fontSize: 12 }}>
+              <span><strong>UV {uvAbierta}</strong> | {UNIDADES_VECINALES.find(u => u.id === uvAbierta)?.nombre}
+                <span className="texto-3"> | {tickets.filter(t => uvDeTicket.get(t.id) === uvAbierta).length} reporte(s)</span></span>
+              <button className="btn btn-sm btn-secundario" onClick={recentrar}>Agrupar de nuevo</button>
+            </div>
+          )}
 
           {/* Leyenda */}
           <div className="anim-arriba" style={{ ...estiloFlotante, left: 12, bottom: 12, width: 220, ["--i" as any]: 2 }}>

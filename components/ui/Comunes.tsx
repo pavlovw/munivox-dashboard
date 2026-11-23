@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { FiX, FiMapPin, FiImage, FiList, FiChevronLeft, FiChevronRight } from "react-icons/fi";
 import {
   ESTADOS, PRIORIDADES, categoriaInfo, slaDe, duracion, leerConversacion, fechaHora,
@@ -204,7 +205,9 @@ export function Galeria({ evidencias, alto = 120 }: { evidencias?: Evidencia[]; 
       if (e.key === "ArrowLeft") setIndice(i => (i === null ? i : (i - 1 + lista.length) % lista.length));
     };
     window.addEventListener("keydown", tecla);
-    return () => window.removeEventListener("keydown", tecla);
+    const desborde = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("keydown", tecla); document.body.style.overflow = desborde; };
   }, [indice, lista.length]);
 
   if (!lista.length) {
@@ -214,24 +217,26 @@ export function Galeria({ evidencias, alto = 120 }: { evidencias?: Evidencia[]; 
     <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 6 }}>
         {lista.map((ev, i) => (
-          <button key={ev.id || i} onClick={() => setIndice(i)} className="anim-escalar" style={{ padding: 0, border: "1px solid var(--borde)", background: "var(--superficie-3)", height: alto, overflow: "hidden", ["--i" as any]: i }}>
+          <button key={ev.id || i} onClick={() => setIndice(i)} className="anim-escalar" title="Ver en grande" style={{ padding: 0, cursor: "zoom-in", border: "1px solid var(--borde)", background: "var(--superficie-3)", height: alto, overflow: "hidden", ["--i" as any]: i }}>
             <img src={ev.url} alt={`Evidencia ${i + 1}`} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover", transition: "transform 0.4s var(--curva)" }}
               onMouseEnter={e => (e.currentTarget.style.transform = "scale(1.06)")} onMouseLeave={e => (e.currentTarget.style.transform = "none")} />
           </button>
         ))}
       </div>
-      {indice !== null && (
-        <div className="visor" onClick={() => setIndice(null)}>
-          <img src={lista[indice].url} alt="Evidencia ampliada" onClick={e => e.stopPropagation()} />
-          <button className="btn-icono" style={{ position: "absolute", top: 16, right: 16 }} onClick={() => setIndice(null)} aria-label="Cerrar"><FiX /></button>
+      {/* El visor va directo al <body>: dentro del panel lateral (que tiene transform) quedaría encerrado y pequeño */}
+      {indice !== null && typeof document !== "undefined" && createPortal(
+        <div className="visor" onClick={() => setIndice(null)} role="dialog" aria-modal="true" aria-label="Fotografía ampliada">
+          <img key={indice} src={lista[indice].url} alt={`Evidencia ${indice + 1} de ${lista.length}`} onClick={e => e.stopPropagation()} />
+          <button className="visor-boton visor-cerrar" onClick={() => setIndice(null)} aria-label="Cerrar" title="Cerrar (Esc)"><FiX size={22} /></button>
           {lista.length > 1 && (
             <>
-              <button className="btn-icono" style={{ position: "absolute", left: 16, top: "50%" }} onClick={e => { e.stopPropagation(); setIndice((indice - 1 + lista.length) % lista.length); }} aria-label="Anterior"><FiChevronLeft /></button>
-              <button className="btn-icono" style={{ position: "absolute", right: 16, top: "50%" }} onClick={e => { e.stopPropagation(); setIndice((indice + 1) % lista.length); }} aria-label="Siguiente"><FiChevronRight /></button>
+              <button className="visor-boton visor-anterior" onClick={e => { e.stopPropagation(); setIndice((indice - 1 + lista.length) % lista.length); }} aria-label="Anterior"><FiChevronLeft size={22} /></button>
+              <button className="visor-boton visor-siguiente" onClick={e => { e.stopPropagation(); setIndice((indice + 1) % lista.length); }} aria-label="Siguiente"><FiChevronRight size={22} /></button>
             </>
           )}
-          <span className="mono" style={{ position: "absolute", bottom: 16, color: "#9FB0CC", fontSize: 12 }}>{indice + 1} / {lista.length}</span>
-        </div>
+          <span className="mono visor-contador">{indice + 1} / {lista.length}</span>
+        </div>,
+        document.body,
       )}
     </>
   );
